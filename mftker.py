@@ -11,6 +11,9 @@ from PIL import Image, ImageTk
 
 import os, sys
 import configparser
+import tempfile
+import subprocess
+import threading
 
 class App(tk.Tk):
 
@@ -68,7 +71,7 @@ class App(tk.Tk):
 
     # create 3 tabs
     nb = ttk.Notebook(container)
-    nb.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
+    nb.grid(column=0, row=0, columnspan=3, sticky=(tk.N, tk.W, tk.E, tk.S))
     nb.columnconfigure(0, weight=1)
     nb.rowconfigure(0, weight=1)
 
@@ -85,9 +88,14 @@ class App(tk.Tk):
     nb.add(tab_stack, text='Stack')
 
 
-    # ==== set up images/files tab ====
-    w = self.widgets # shorthand
+    # add top-level buttons
+    ttk.Button(container, text='Preferences').grid(column=2, row=0, sticky=(tk.E, tk.N), padx=10)
 
+
+    w = self.widgets # shorthand
+    w['nb'] = nb
+
+    # ==== set up images/files tab ====
     pn_tabimages = ttk.PanedWindow(tab_images, orient=tk.HORIZONTAL)
 
     pn_tabimages.grid(column=0, row=0, sticky=(tk.NS, tk.EW))
@@ -104,8 +112,8 @@ class App(tk.Tk):
     # image list
     w['lb_images'] = tk.Listbox(fr_images, selectmode='extended')
     w['lb_images'].grid(column=0, row=0, sticky=(tk.NS, tk.EW))
-    w['lb_images'].bind('<<ListboxSelect>>', self.lb_images_selected)
-    w['lb_images'].bind('<Button-1>', self.lb_images_clicked)
+    w['lb_images'].bind('<<ListboxSelect>>', self.ui_lb_images_selected)
+    w['lb_images'].bind('<Button-1>', self.ui_lb_images_clicked)
 
     # scrollbar for image list
     s = ttk.Scrollbar(fr_images, orient=tk.VERTICAL, command=w['lb_images'].yview)
@@ -130,6 +138,8 @@ class App(tk.Tk):
 
 
     # ==== set up Masks tab ====
+
+
 
 
     # ==== set up Stack tab ====
@@ -166,8 +176,7 @@ class App(tk.Tk):
     w['ck_fov'].var = v_ck_fov
 
     # correlation threshold
-    lb_corr_threshold = ttk.Label(fr_stack_align, text='Correlation threshold: ')
-    lb_corr_threshold.grid(column=0, row=2, sticky=(tk.E), padx=20, pady=10)
+    ttk.Label(fr_stack_align, text='Correlation threshold: ').grid(column=0, row=2, sticky=(tk.E), padx=20, pady=10)
 
     v_sp_corr_threshold = tk.StringVar()
     w['sp_corr_threshold'] = ttk.Spinbox(fr_stack_align, from_=0.0, to=1.0, increment=0.1,
@@ -175,36 +184,44 @@ class App(tk.Tk):
     w['sp_corr_threshold'].grid(column=1, row=2, sticky=(tk.W), padx=20, pady=10)
     w['sp_corr_threshold'].var = v_sp_corr_threshold
 
+    # error threshold
+    ttk.Label(fr_stack_align, text='Error threshold: ').grid(column=0, row=3, sticky=(tk.E), padx=20, pady=10)
+
+    v_sp_error_threshold = tk.StringVar()
+    w['sp_error_threshold'] = ttk.Spinbox(fr_stack_align, from_=1, to=20, increment=1,
+                                         justify=tk.CENTER, width=10, textvariable=v_sp_error_threshold)
+    w['sp_error_threshold'].grid(column=1, row=3, sticky=(tk.W), padx=20, pady=10)
+    w['sp_error_threshold'].var = v_sp_error_threshold
+
+
     # control points
-    ttk.Label(fr_stack_align, text='Number of control points: ').grid(column=0, row=3, sticky=(tk.E), padx=20, pady=7)
+    ttk.Label(fr_stack_align, text='Number of control points: ').grid(column=0, row=4, sticky=(tk.E), padx=20, pady=7)
 
     v_sp_control_points = tk.IntVar()
     w['sp_control_points'] = ttk.Spinbox(fr_stack_align, from_=0, to=50, increment=1,
                                          justify=tk.CENTER, width=10, textvariable=v_sp_control_points)
-    w['sp_control_points'].grid(column=1, row=3, sticky=(tk.W), padx=20, pady=7)
+    w['sp_control_points'].grid(column=1, row=4, sticky=(tk.W), padx=20, pady=7)
     w['sp_control_points'].var = v_sp_control_points
 
     # grid size
-    lb_grid_size = ttk.Label(fr_stack_align, text='Grid size: ')
-    lb_grid_size.grid(column=0, row=4, sticky=(tk.E), padx=20, pady=7)
+    ttk.Label(fr_stack_align, text='Grid size: ').grid(column=0, row=5, sticky=(tk.E), padx=20, pady=7)
 
     v_sp_grid_size = tk.IntVar()
     w['sp_grid_size'] = ttk.Spinbox(fr_stack_align, from_=1, to=10, increment=1,
                                     justify=tk.CENTER, width=10, textvariable=v_sp_grid_size)
-    w['sp_grid_size'].grid(column=1, row=4, sticky=(tk.W), padx=20, pady=7)
+    w['sp_grid_size'].grid(column=1, row=5, sticky=(tk.W), padx=20, pady=7)
     w['sp_grid_size'].var = v_sp_grid_size
 
     # scale factor
-    lb_scale_factor = ttk.Label(fr_stack_align, text='Scale factor: ')
-    lb_scale_factor.grid(column=0, row=5, sticky=(tk.E), padx=20, pady=7)
+    ttk.Label(fr_stack_align, text='Scale factor: ').grid(column=0, row=6, sticky=(tk.E), padx=20, pady=7)
 
     v_sp_scale_factor = tk.IntVar()
     w['sp_scale_factor'] = ttk.Spinbox(fr_stack_align, from_=1, to=5, increment=1,
                                        justify=tk.CENTER, width=10, textvariable=v_sp_scale_factor)
-    w['sp_scale_factor'].grid(column=1, row=5, sticky=(tk.W), padx=20, pady=7)
+    w['sp_scale_factor'].grid(column=1, row=6, sticky=(tk.W), padx=20, pady=7)
     w['sp_scale_factor'].var = v_sp_scale_factor
 
-    ttk.Frame(fr_stack_align).grid(column=0, row=6, pady=5)  # padding bottom
+    ttk.Frame(fr_stack_align).grid(column=0, row=7, pady=5)  # padding bottom
 
 
     # Fusion options
@@ -321,26 +338,6 @@ class App(tk.Tk):
     fr_stack_output.grid(column=0, row=4, sticky=(tk.N, tk.EW))
     fr_stack_output.columnconfigure(3, weight=1)
 
-    # preview size
-    ttk.Label(fr_stack_output, text='Preview size  ').grid(column=0, row=0, sticky=(tk.W), padx=10, pady=7)
-
-    fr_preview_size = ttk.Frame(fr_stack_output)
-    fr_preview_size.grid(column=1, row=0, sticky=(tk.E))
-
-    ttk.Label(fr_preview_size, text='width: ').grid(column=0, row=0, sticky=(tk.E), padx=5, pady=7)
-
-    v_en_preview_w = tk.IntVar()
-    w['en_preview_w'] = ttk.Entry(fr_preview_size, width=10, justify=tk.CENTER, textvariable=v_en_preview_w)
-    w['en_preview_w'].grid(column=1, row=0, sticky=(tk.W), padx=5, pady=7)
-    w['en_preview_w'].var = v_en_preview_w
-
-    ttk.Label(fr_preview_size, text='   height: ').grid(column=2, row=0, sticky=(tk.E), padx=5, pady=7)
-
-    v_en_preview_h = tk.IntVar()
-    w['en_preview_h'] = ttk.Entry(fr_preview_size, width=10, justify=tk.CENTER, textvariable=v_en_preview_h)
-    w['en_preview_h'].grid(column=3, row=0, sticky=(tk.W), padx=5, pady=7)
-    w['en_preview_h'].var = v_en_preview_h
-
 
     # final output size
     v_ck_output_size = tk.BooleanVar()
@@ -428,21 +425,55 @@ class App(tk.Tk):
     fr_stack_actions.columnconfigure(0, weight=1)
     fr_stack_actions.columnconfigure(1, weight=1)
 
-    w['bt_preview'] = ttk.Button(fr_stack_actions, text='Preview')
-    w['bt_preview'].grid(column=0, row=0)
+    w['bt_stack'] = ttk.Button(fr_stack_actions, text='Stack', command=self.stack_images)
+    w['bt_stack'].grid(column=0, row=0)
 
-    w['bt_stack'] = ttk.Button(fr_stack_actions, text='Stack')
-    w['bt_stack'].grid(column=1, row=0)
+    ttk.Button(fr_stack_actions, text='Toggle log', command=self.toggle_log).grid(column=1, row=0, sticky=(tk.E))
+
 
 
     # stacked preview pane
     w['cv_stacked_preview'] = tk.Canvas(tab_stack, background='#eeeeee')
-    w['cv_stacked_preview'].grid(column=1, row=0, rowspan=6, sticky=(tk.NS, tk.EW))
-    #w['cv_stacked_preview'].bind("<Configure>", self.update_stacked_image_preview)
+    w['cv_stacked_preview'].grid(column=1, row=0, rowspan=6, sticky=(tk.NS, tk.EW), padx=(4,0))
+    w['cv_stacked_preview'].bind("<Configure>", lambda x: self.update_output_image_preview())
+    w['cv_stacked_preview'].grid_remove()
 
-    nb.select(2) # debug
 
+    # textbox to print log to
+    w['tx_log'] = tk.Text(tab_stack, width=50, height=40, borderwidth=5, relief=tk.FLAT)
+    w['tx_log'].grid(column=1, row=0, rowspan=6, sticky=(tk.NS, tk.EW), padx=(4, 0))
+
+    # scrollbar for log text
+    s = ttk.Scrollbar(tab_stack, orient=tk.VERTICAL, command=w['tx_log'].yview)
+    s.grid(column=2, row=0, rowspan=6, sticky=(tk.NS))
+    w['tx_log']['yscrollcommand'] = s.set
+    w['tx_log'].scroll = s
+
+
+    # apply configs to all widgets
     self.apply_config()
+
+
+
+
+  # ==== Event handlers for widgets ====
+
+  def ui_lb_images_clicked(self, event):
+    self.flags['lb_images_clicked'] = True
+    index = self.widgets['lb_images'].index("@%s,%s" % (event.x, event.y))
+    self.update_input_image_preview(index)
+
+
+  def ui_lb_images_selected(self, event):
+    if self.flags['lb_images_clicked']:
+      self.flags['lb_images_clicked'] = False
+      return
+
+    selection = self.widgets['lb_images'].curselection()
+    if len(selection) == 1:
+      self.update_input_image_preview(selection[0])
+    else:
+      self.update_input_image_preview(selection[-1])
 
 
   def ui_ck_align_changed(self):
@@ -515,6 +546,22 @@ class App(tk.Tk):
     w['cb_file_format'].selection_clear()
 
 
+  def toggle_log(self, show = None):
+    w = self.widgets
+
+    if show == None:
+      show = not w['tx_log'].winfo_ismapped()
+
+    if show:
+      w['tx_log'].grid()
+      w['tx_log'].scroll.grid()
+      w['cv_stacked_preview'].grid_remove()
+    else:
+      w['tx_log'].grid_remove()
+      w['tx_log'].scroll.grid_remove()
+      w['cv_stacked_preview'].grid()
+
+
   def add_images(self):
     initial_dir = '~'
 
@@ -547,21 +594,6 @@ class App(tk.Tk):
     for i in reversed(selection):
       self.input_images.pop(i)
       self.widgets['lb_images'].delete(i)
-
-
-  def lb_images_clicked(self, event):
-    self.flags['lb_images_clicked'] = True
-    index = self.widgets['lb_images'].index("@%s,%s" % (event.x, event.y))
-    self.update_input_image_preview(index)
-
-
-  def lb_images_selected(self, event):
-    if self.flags['lb_images_clicked']:
-      self.flags['lb_images_clicked'] = False
-      return
-
-    selection = self.widgets['lb_images'].curselection()
-    self.update_input_image_preview(selection[-1])
 
 
   def update_input_image_preview(self, index):
@@ -605,6 +637,27 @@ class App(tk.Tk):
     cv.image = img
 
 
+  def update_output_image_preview(self):
+    if len(self.input_images) == 0:
+      return
+
+    cv = self.widgets['cv_stacked_preview']
+    width = cv.winfo_width()
+    height = cv.winfo_height()
+
+    output_file = os.path.join(
+      os.path.basename(self.input_images[0]),
+      self.output_name
+    )
+
+    img = Image.open(output_file)
+    img.thumbnail((width, height), Image.LANCZOS)
+    img = ImageTk.PhotoImage(img)
+
+    cv.create_image(width/2, height/2, anchor=tk.CENTER, image=img)
+    cv.image = img
+
+
   def load_config(self):
     self.config = configparser.ConfigParser()
     c = self.config
@@ -618,6 +671,7 @@ class App(tk.Tk):
       'ck_centershift'          : 'True',
       'ck_fov'                  : 'True',
       'sp_corr_threshold'       : '0.9',
+      'sp_error_threshold'      : '3',
       'sp_control_points'       : '10',
       'sp_grid_size'            : '5',
       'sp_scale_factor'         : '1',
@@ -644,7 +698,9 @@ class App(tk.Tk):
       'en_output_yoffset'       : '0',
       'cb_file_format'          : 'JPG',
       'sp_jpg_quality'          : '90',
-      'cb_tif_compression'      : 'lzw'
+      'cb_tif_compression'      : 'lzw',
+
+      'align_prefix'            : 'aligned__'
     }
 
     if not c.has_section('prefs'):
@@ -706,7 +762,159 @@ class App(tk.Tk):
     self.destroy()
 
 
+  def build_align_command(self):
+    cmd = ['align_image_stack', '-v', '-aaligned__', '--use-given-order']
 
+    # get the alignment options
+    w = self.widgets
+
+    if w['ck_autocrop'].var.get():
+      cmd.append('-C')
+
+    if w['ck_centershift'].var.get():
+      cmd.append('-i')
+
+    if w['ck_fov'].var.get():
+      cmd.append('-m')
+
+    cmd.append('--corr=' + str(w['sp_corr_threshold'].var.get()))
+    cmd.append('-t ' + str(w['sp_error_threshold'].var.get()))
+    cmd.append('-c ' + str(w['sp_control_points'].var.get()))
+    cmd.append('-g ' + str(w['sp_grid_size'].var.get()))
+    cmd.append('-s ' + str(w['sp_scale_factor'].var.get()))
+
+    cmd = cmd + self.input_images
+    return cmd
+
+
+  def build_enfuse_command(self):
+    cmd = ['enfuse', '-v', '-o', self.output_name,
+           '--exposure-weight=0',
+           '--saturation-weight=0',
+           '--contrast-weight=1']
+
+    w = self.widgets
+
+    if w['ck_hard_mask'].var.get():
+      cmd.append('--hard-mask')
+
+    if not w['ck_levels'].var.get():
+      cmd.append('--levels=' + str(w['sp_levels'].var.get()))
+
+    if w['ck_edge_scale'].var.get():
+      opt = str(w['sp_edge_scale'].var.get()) + ':'
+      opt = opt + str(w['sp_lce_scale'].var.get()) + '%' if w['ck_lce_scale'].var.get() else ''
+      opt = opt + ':' + str(w['sp_lce_level'].var.get()) + '%' if w['ck_lce_level'].var.get() else ''
+      cmd.append('--contrast-edge-scale=' + opt)
+
+    if w['ck_curvature'].var.get():
+      cmd.append('--contrast-min-curvature=' + str(w['sp_curvature'].var.get()) +
+                 '%' if w['ck_curvature_pc'].var.get() else '')
+
+    cmd.append('--gray-projector=' + str(w['cb_gray_proj'].var.get()))
+    cmd.append('--contrast-window-size=' + str(w['sp_window_size'].var.get()))
+
+    if w['cb_file_format'].var.get() == 'JPG':
+      cmd.append('--compression=' + str(w['sp_jpg_quality'].var.get()))
+    else:
+      cmd.append('--compression=' + str(w['cb_tif_compression'].var.get()))
+
+    if w['ck_align'].var.get():
+      cmd = cmd + self.aligned_images
+    else:
+      cmd = cmd + self.input_images
+
+    return cmd
+
+
+  def stack_images(self):
+    """ perform optional alignment and fusing the images """
+    w = self.widgets
+
+    # check if we have at least 2 images
+    if len(self.input_images) < 2:
+      tk.messagebox.showinfo(message='Please add at least two images.')
+      w['nb'].select(0)
+      return
+
+    extension = '.jpg' if w['cb_file_format'].var.get() == 'JPG' else '.tif'
+    default_filename = os.path.splitext(os.path.basename(self.input_images[0]))[0] + '_fused' + extension
+
+    self.output_name = tk.filedialog.asksaveasfilename(
+      initialdir=self.config['prefs']['last_opened_location'],
+      confirmoverwrite=True,
+      defaultextension=extension,
+      initialfile=default_filename
+    )
+
+    if not self.output_name:
+      return
+
+    w['tx_log'].delete(1.0, tk.END)
+    self.toggle_log(True)
+
+    self.returncode = tk.IntVar()
+
+    if w['ck_align'].var.get():
+      self.aligned_images = []
+
+      for i, image in enumerate(self.input_images):
+        self.aligned_images.append(os.path.join(
+          os.path.dirname(image),
+          self.config.get('prefs', 'align_prefix') + '{:04d}'.format(i) + '.tif'))
+
+      align_cmd = self.build_align_command()
+      print(align_cmd)
+
+      self.returncode.set(-1)
+      threading.Thread(target=self.execute_cmd, args=[align_cmd], daemon=True).start()
+      self.wait_variable(self.returncode)
+
+      if self.returncode.get() > 0:
+        tk.messagebox.showerror(message='Error aligning images, please check output log.')
+        return
+
+
+    enfuse_cmd = self.build_enfuse_command()
+    print(enfuse_cmd)
+
+    w['tx_log'].insert(tk.END, '\n\n===== CALLING ENFUSE =====\n')
+    w['tx_log'].insert(tk.END, 'output to ' + self.output_name + '\n\n')
+
+    self.returncode.set(-1)
+    threading.Thread(target=self.execute_cmd, args=[enfuse_cmd], daemon=True).start()
+    self.wait_variable(self.returncode)
+
+    if self.returncode.get() > 0:
+      tk.messagebox.showerror(message='Error stacking images, please check output log.')
+      return
+
+    w['tx_log'].insert(tk.END, '\nDone stacking to ' + self.output_name + '\n\n')
+    w['tx_log'].see(tk.END)
+
+    # load the output file into the result pane
+    self.update_output_image_preview()
+    self.toggle_log(False)
+
+    # clean up aligned TIFFs
+    if w['ck_align'].var.get():
+      for filename in self.aligned_images:
+        os.remove(filename)
+
+
+
+  def execute_cmd(self, cmd):
+    log_box = self.widgets['tx_log']
+    working_dir = os.path.dirname(self.input_images[0])
+
+    p = subprocess.Popen(cmd, cwd=working_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    while p.poll() is None:
+      msg = p.stdout.readline()
+      log_box.insert(tk.END, msg)
+      log_box.see(tk.END)
+
+    self.returncode.set(p.returncode)
 
 
 if __name__ == "__main__":
