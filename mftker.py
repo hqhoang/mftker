@@ -25,15 +25,26 @@ class App(tk.Tk):
     self.input_images = [] # list of filenames
     self.widgets = {}      # list of widgets
     self.config  = {}      # configurations
-    self.flags   = {}      # various flags used internally
+    self.flags   = {       # various flags used internally
+      'tr_mask_clicked'   : False
+    }
+    self.masks   = {}      # storage for masks, indexed by filepaths
+    self.new_mask = None   # keep track of the mask being created
 
-    self.current_preview_index = -1;
     self.preview_cache = {
       'slots' : [None] * 5,
       'head'   : 0,
       'width'  : -1,
       'height' : -1
     }
+
+    self.mask_preview_cache = {
+      'slots' : [None] * 5,
+      'head'   : 0,
+    }
+
+
+
 
     self.load_config()
 
@@ -55,13 +66,14 @@ class App(tk.Tk):
     style.configure('TLabelframe', background='#f8f8f8', labelmargins=10, padding=0)
     style.configure('TLabelframe.Label', background='#f8f8f8')
     style.configure('TCheckbutton', background='#f8f8f8')
+    style.configure('TRadiobutton', background='#f8f8f8')
     style.configure('TLabel', background='#f8f8f8')
     style.configure('TSpinbox', arrowsize=17)
     style.configure('TCombobox', arrowsize=17, fieldbackground='#f8f8f8')
     style.map('TCombobox', fieldbackground=[('readonly', '#f8f8f8')])
 
     default_font = tk.font.nametofont('TkDefaultFont')
-    default_font.configure(size=12)
+    default_font.configure(size=11)
 
     container = ttk.Frame(self)
     container.grid(column=0, row=0, sticky=(tk.N, tk.W, tk.E, tk.S))
@@ -95,6 +107,8 @@ class App(tk.Tk):
     w = self.widgets # shorthand
     w['nb'] = nb
 
+
+
     # ==== set up images/files tab ====
     pn_tabimages = ttk.PanedWindow(tab_images, orient=tk.HORIZONTAL)
 
@@ -110,10 +124,9 @@ class App(tk.Tk):
     fr_images.rowconfigure(0, weight=1)
 
     # image list
-    w['lb_images'] = tk.Listbox(fr_images, selectmode='extended')
+    w['lb_images'] = tk.Listbox(fr_images, selectmode=tk.EXTENDED)
     w['lb_images'].grid(column=0, row=0, sticky=(tk.NS, tk.EW))
     w['lb_images'].bind('<<ListboxSelect>>', self.ui_lb_images_selected)
-    w['lb_images'].bind('<Button-1>', self.ui_lb_images_clicked)
 
     # scrollbar for image list
     s = ttk.Scrollbar(fr_images, orient=tk.VERTICAL, command=w['lb_images'].yview)
@@ -123,7 +136,7 @@ class App(tk.Tk):
     # preview pane
     w['cv_image_preview'] = tk.Canvas(pn_tabimages, background='#eeeeee')
     w['cv_image_preview'].grid(column=1, row=0, sticky=(tk.NS, tk.EW))
-    w['cv_image_preview'].bind('<Configure>', lambda x: self.update_input_image_preview(self.current_preview_index))
+    w['cv_image_preview'].bind('<Configure>', lambda x: self.update_input_image_preview())
     pn_tabimages.add(w['cv_image_preview'], weight=3)
 
     fr_image_actions = ttk.Frame(tab_images)
@@ -137,7 +150,114 @@ class App(tk.Tk):
 
 
 
+
     # ==== set up Masks tab ====
+    pn_tabmasks = ttk.PanedWindow(tab_masks, orient=tk.HORIZONTAL)
+
+    pn_tabmasks.grid(column=0, row=0, sticky=(tk.NS, tk.EW))
+    tab_masks.columnconfigure(0, weight=1)
+    tab_masks.rowconfigure(0, weight=1)
+
+    # divide the left pane into two above/below panes (images and masks)
+    pn_tabmasks_left = ttk.PanedWindow(pn_tabmasks, orient=tk.VERTICAL)
+    pn_tabmasks.add(pn_tabmasks_left, weight=0)
+
+    fr_mask_images = ttk.Frame(pn_tabmasks_left)
+    fr_mask_images.grid(column=0, row=0, sticky=(tk.NS, tk.EW))
+    pn_tabmasks_left.add(fr_mask_images, weight=1)
+
+    fr_mask_images.columnconfigure(0, weight=1)
+    fr_mask_images.rowconfigure(0, weight=1)
+
+    # image/mask tree
+    w['tr_mask_images'] = ttk.Treeview(fr_mask_images, selectmode=tk.EXTENDED,
+                                       columns=('include', 'exclude'))
+    w['tr_mask_images'].column('include', width=30, anchor=tk.CENTER)
+    w['tr_mask_images'].heading('include', text='Include')
+    w['tr_mask_images'].column('exclude', width=30, anchor=tk.CENTER)
+    w['tr_mask_images'].heading('exclude', text='Exclude')
+
+    w['tr_mask_images'].grid(column=0, row=0, sticky=(tk.NS, tk.EW))
+    w['tr_mask_images'].bind('<<TreeviewSelect>>', self.ui_tr_mask_images_selected)
+
+    # scrollbar for image/mask tree
+    s = ttk.Scrollbar(fr_mask_images, orient=tk.VERTICAL, command=w['tr_mask_images'].yview)
+    s.grid(column=1, row=0, sticky=(tk.NS))
+    w['tr_mask_images']['yscrollcommand'] = s.set
+
+
+    # lower pane for masks
+    fr_masks = ttk.Frame(pn_tabmasks_left)
+    fr_masks.grid(column=0, row=1, sticky=(tk.NS, tk.EW))
+    pn_tabmasks_left.add(fr_masks, weight=1)
+
+    fr_masks.columnconfigure(0, weight=1)
+    fr_masks.rowconfigure(1, weight=1)
+
+    # mask actions/buttons
+    fr_mask_image_actions = ttk.Frame(fr_masks)
+    fr_mask_image_actions.grid(column=0, row=0, columnspan=2, sticky=(tk.S, tk.EW))
+
+    w['bt_mask_add'] = ttk.Button(fr_mask_image_actions, text='Add mask', command=self.add_mask)
+    w['bt_mask_add'].grid(column=0, row=0, padx=5, pady=5, ipadx=3)
+
+    v_sp_mask_add_type = tk.StringVar()
+    w['sp_mask_add_type'] = ttk.Spinbox(fr_mask_image_actions, values=('include', 'exclude'), wrap=True,
+                                        textvariable=v_sp_mask_add_type, width=8, state='readonly')
+    w['sp_mask_add_type'].grid(column=1, row=0)
+    w['sp_mask_add_type'].var = v_sp_mask_add_type
+
+    w['bt_mask_paste'] = ttk.Button(fr_mask_image_actions, text='Paste', command=self.paste_masks)
+    w['bt_mask_paste'].grid(column=2, row=0, padx=10, pady=5, ipadx=3)
+
+    w['bt_mask_clear'] = ttk.Button(fr_mask_image_actions, text='Clear', command=self.clear_masks)
+    w['bt_mask_clear'].grid(column=3, row=0, padx=0, pady=5, ipadx=3)
+
+
+    # mask lists of selected image
+    w['tr_masks'] = ttk.Treeview(fr_masks, selectmode=tk.EXTENDED, columns=('type'))
+    w['tr_masks'].column('type', width=150, anchor=tk.CENTER)
+    w['tr_masks'].heading('type', text='Mask type')
+
+    w['tr_masks'].grid(column=0, row=1, sticky=(tk.NS, tk.EW))
+    w['tr_masks'].bind('<<TreeviewSelect>>', self.ui_tr_masks_selected)
+
+    # scrollbar for mask list
+    s = ttk.Scrollbar(fr_masks, orient=tk.VERTICAL, command=w['tr_masks'].yview)
+    s.grid(column=1, row=1, sticky=(tk.NS))
+    w['tr_masks']['yscrollcommand'] = s.set
+    w['tr_masks'].scroll = s
+
+    # mask actions: Include, Exclude, Delete, Copy
+    fr_mask_actions = ttk.Frame(fr_masks)
+    fr_mask_actions.grid(column=0, row=2, columnspan=2, sticky=(tk.EW, tk.S))
+
+    w['bt_mask_include'] = ttk.Button(fr_mask_actions, text='Include', command=self.set_masks_include)
+    w['bt_mask_include'].grid(column=0, row=0, padx=5, pady=5, ipadx=3)
+
+    w['bt_mask_exclude'] = ttk.Button(fr_mask_actions, text='Exclude', command=self.set_masks_exclude)
+    w['bt_mask_exclude'].grid(column=1, row=0, padx=5, pady=5, ipadx=3)
+
+    w['bt_mask_delete'] = ttk.Button(fr_mask_actions, text='Delete', command=self.delete_masks)
+    w['bt_mask_delete'].grid(column=2, row=0, padx=5, pady=5, ipadx=3)
+
+    w['bt_mask_copy'] = ttk.Button(fr_mask_actions, text='Copy', command=self.copy_masks)
+    w['bt_mask_copy'].grid(column=3, row=0, padx=5, pady=5, ipadx=3)
+
+
+    # canvas to draw masks
+    w['cv_image_masks'] = tk.Canvas(pn_tabmasks, background='#eeeeee')
+    w['cv_image_masks'].grid(column=1, row=0, sticky=(tk.NS, tk.EW))
+    w['cv_image_masks'].old_width  = w['cv_image_masks'].winfo_width()
+    w['cv_image_masks'].old_height = w['cv_image_masks'].winfo_height()
+
+    w['cv_image_masks'].bind('<Configure>', lambda x: self.update_mask_canvas())
+    w['cv_image_masks'].bind('<Motion>', self.ui_cv_image_masks_motion)
+    w['cv_image_masks'].bind('<Button-1>', self.ui_cv_image_masks_b1)
+    w['cv_image_masks'].bind('<Double-Button-1>', self.end_new_mask)
+    self.bind('<Return>', self.end_new_mask)
+
+    pn_tabmasks.add(w['cv_image_masks'], weight=2)
 
 
 
@@ -453,27 +573,54 @@ class App(tk.Tk):
     # apply configs to all widgets
     self.apply_config()
 
+    # additional initial setup
+    w['bt_image_remove'].configure(state=tk.DISABLED)
+
+    w['bt_mask_add'].configure(state=tk.DISABLED)
+    w['bt_mask_clear'].configure(state=tk.DISABLED)
+    w['bt_mask_paste'].configure(state=tk.DISABLED)
+
+    w['bt_mask_include'].configure(state=tk.DISABLED)
+    w['bt_mask_exclude'].configure(state=tk.DISABLED)
+    w['bt_mask_delete'].configure(state=tk.DISABLED)
+    w['bt_mask_copy'].configure(state=tk.DISABLED)
+
+
 
 
 
   # ==== Event handlers for widgets ====
 
-  def ui_lb_images_clicked(self, event):
-    self.flags['lb_images_clicked'] = True
-    index = self.widgets['lb_images'].index("@%s,%s" % (event.x, event.y))
-    self.update_input_image_preview(index)
-
-
   def ui_lb_images_selected(self, event):
-    if self.flags['lb_images_clicked']:
-      self.flags['lb_images_clicked'] = False
-      return
+    if len(self.widgets['lb_images'].curselection()) > 0:
+      self.widgets['bt_image_remove'].configure(state=tk.NORMAL)
+    self.update_input_image_preview()
 
-    selection = self.widgets['lb_images'].curselection()
-    if len(selection) == 1:
-      self.update_input_image_preview(selection[0])
-    else:
-      self.update_input_image_preview(selection[-1])
+
+
+  def ui_tr_mask_images_selected(self, event):
+    w = self.widgets
+
+    if len(w['tr_mask_images'].selection()) > 0:
+      w['bt_mask_add'].configure(state=tk.NORMAL)
+      w['bt_mask_clear'].configure(state=tk.NORMAL)
+
+    self.new_mask = None
+
+    self.update_mask_canvas()
+    self.update_mask_list()
+
+
+
+  def ui_tr_masks_selected(self, event):
+    w = self.widgets
+
+    if len(w['tr_masks'].selection()) > 0:
+      w['bt_mask_include'].configure(state=tk.NORMAL)
+      w['bt_mask_exclude'].configure(state=tk.NORMAL)
+      w['bt_mask_delete'].configure(state=tk.NORMAL)
+      w['bt_mask_copy'].configure(state=tk.NORMAL)
+
 
 
   def ui_ck_align_changed(self):
@@ -563,12 +710,14 @@ class App(tk.Tk):
 
 
   def add_images(self):
+    w = self.widgets
+    c = self.config
     initial_dir = '~'
 
-    if 'prefs' in self.config and 'last_opened_location' in self.config['prefs']:
-      initial_dir = self.config['prefs']['last_opened_location']
+    if 'prefs' in c and 'last_opened_location' in c['prefs']:
+      initial_dir = c['prefs']['last_opened_location']
 
-    filenames = tk.filedialog.askopenfilenames(title='Add images', initialdir=initial_dir, filetypes=[
+    filepaths = tk.filedialog.askopenfilenames(title='Add images', initialdir=initial_dir, filetypes=[
               ('image', '.jpg'),
               ('image', '.jpeg'),
               ('image', '.png'),
@@ -576,46 +725,75 @@ class App(tk.Tk):
               ('image', '.tiff')
             ])
 
-    if len(filenames) == 0:
+    if len(filepaths) == 0:
       return
 
     # save the current location
-    self.config.set('prefs', 'last_opened_location', os.path.dirname(filenames[0]))
+    c.set('prefs', 'last_opened_location', os.path.dirname(filepaths[0]))
 
-    # update the image list
-    for filename in filenames:
-      self.widgets['lb_images'].insert('end', ' ' + os.path.basename(filename))
-      self.input_images.append(filename)
+    # update the image list in Images and Stacks tabs
+    for filepath in filepaths:
+      filename = os.path.basename(filepath)
+
+      w['lb_images'].insert(tk.END, ' ' + filename)
+      self.input_images.append(filepath)
+
+      w['tr_mask_images'].insert('', tk.END, filepath, text=filename)
 
 
   def remove_images(self):
-    selection = self.widgets['lb_images'].curselection()
+    w = self.widgets
+    selection = w['lb_images'].curselection()
 
     for i in reversed(selection):
-      self.input_images.pop(i)
-      self.widgets['lb_images'].delete(i)
+      filepath = self.input_images.pop(i)
+      w['lb_images'].delete(i)
+      w['tr_mask_images'].delete(filepath)
+
+    w['bt_image_remove'].configure(state=tk.DISABLED)
+
+    # clear the image and mask preview
+    self.update_input_image_preview()
 
 
-  def update_input_image_preview(self, index):
-    # update the preview with the specified image at index
-    if index < 0:
+  def get_current_input_image(self):
+    """ helper to get the currently selected input image.
+    Return None if no image or multiple images selected """
+    selection = self.widgets['lb_images'].curselection()
+
+    if len(selection) != 1:
+      return None
+
+    return selection[0]
+
+
+
+  def update_input_image_preview(self):
+    """ update the preview with the specified image at index """
+    cv = self.widgets['cv_image_preview']
+
+    selection = self.widgets['lb_images'].curselection()
+
+    if len(selection) != 1:
+      cv.delete(tk.ALL)
       return
 
-    self.current_preview_index = index
-    cv = self.widgets['cv_image_preview']
+    index = selection[0]
+
     width = cv.winfo_width()
     height = cv.winfo_height()
 
     # if size changed, clear buffer
     hit = False
+    cache = self.preview_cache
 
-    if self.preview_cache['width'] != width or self.preview_cache['height'] != height:
-      self.preview_cache['slots'] = [None] * len(self.preview_cache['slots'])
-      self.preview_cache['width'] = width
-      self.preview_cache['height'] = height
+    if cache['width'] != width or cache['height'] != height:
+      cache['slots'] = [None] * len(cache['slots'])
+      cache['width'] = width
+      cache['height'] = height
     else:
       # check buffer
-      for item in self.preview_cache['slots']:
+      for item in cache['slots']:
         if item and item['filename'] == self.input_images[index]:
           img = item['img']
           hit = True
@@ -626,15 +804,285 @@ class App(tk.Tk):
       img.thumbnail((width, height), Image.LANCZOS)
       img = ImageTk.PhotoImage(img)
 
-      buffer_slot = self.preview_cache['head'] % len(self.preview_cache['slots'])
-      self.preview_cache['slots'][buffer_slot] = {
+      buffer_slot = cache['head'] % len(cache['slots'])
+      cache['slots'][buffer_slot] = {
         'filename' : self.input_images[index],
         'img'      : img
       }
-      self.preview_cache['head'] = (self.preview_cache['head']+1) % len(self.preview_cache['slots'])
+      cache['head'] = (cache['head']+1) % len(cache['slots'])
 
     cv.create_image(width/2, height/2, anchor=tk.CENTER, image=img)
     cv.image = img
+
+
+  def get_current_mask_image(self):
+    """ return the image_id/filepath of the currently selected image in Masks tab
+        return None if no image or multiple images selected """
+    selection = self.widgets['tr_mask_images'].selection()
+
+    if len(selection) != 1:
+      return None
+
+    return selection[0]
+
+
+
+  def add_mask(self):
+    self.new_mask = []
+
+    # add a place holder for cv.new_mask
+    cv = self.widgets['cv_image_masks']
+    cv.new_mask = cv.create_line(0, 0, 0, 0, fill='')
+
+    self.widgets['bt_mask_add'].configure(state=tk.DISABLED)
+
+
+  def copy_masks(self):
+    return
+
+
+  def paste_masks(self):
+    return
+
+
+  def clear_masks(self):
+    selection = self.widgets['tr_mask_images'].selection()
+
+    for image_id in selection:
+      if image_id in self.masks:
+        del self.masks[image_id]
+
+    self.update_mask_list()
+    self.update_mask_canvas()
+
+
+  def delete_masks(self):
+    w = self.widgets
+    selection = w['tr_masks'].selection()
+
+    image_id = self.get_current_mask_image()
+    if image_id == None:
+      return
+
+    for mask_index in reversed(selection):
+      self.masks[image_id].pop(int(mask_index)-1)
+
+    self.update_mask_list()
+    self.update_mask_canvas()
+
+
+  def set_masks_include(self):
+    w = self.widgets
+    selection = w['tr_masks'].selection()
+
+    image_id = self.get_current_mask_image()
+    if image_id == None:
+      return
+
+    for mask_index in selection:
+      mask = self.masks[image_id][int(mask_index)-1]
+      mask['type'] = 'include'
+
+    self.update_mask_list()
+    self.update_mask_canvas()
+
+
+  def set_masks_exclude(self):
+    w = self.widgets
+    selection = w['tr_masks'].selection()
+
+    image_id = self.get_current_mask_image()
+    if image_id == None:
+      return
+
+    for mask_index in selection:
+      mask = self.masks[image_id][int(mask_index)-1]
+      mask['type'] = 'exclude'
+
+    self.update_mask_list()
+    self.update_mask_canvas()
+
+
+  def ui_cv_image_masks_b1(self, event):
+    cv = self.widgets['cv_image_masks']
+
+    # handle mask creation
+    if self.new_mask != None:
+      self.new_mask = self.new_mask + [event.x, event.y]
+      cv.delete(cv.new_mask)
+      cv.new_mask = cv.create_polygon(self.new_mask + [event.x, event.y], fill='', outline='#ffffff')
+
+
+  def ui_cv_image_masks_motion(self, event):
+    if self.new_mask != None and len(self.new_mask) > 0:
+      cv = self.widgets['cv_image_masks']
+
+      if len(self.new_mask) == 2:
+        cv.delete(cv.new_mask)
+        cv.new_mask = cv.create_line(self.new_mask + [event.x, event.y], fill='#ffffff')
+      else:
+        cv.delete(cv.new_mask)
+        cv.new_mask = cv.create_polygon(self.new_mask + [event.x, event.y], fill='', outline='#ffffff')
+
+
+
+  def end_new_mask(self, event):
+    """ user double-clicked on canvas ==> finish creating the new mask """
+    w = self.widgets
+    cv = w['cv_image_masks']
+
+    if self.new_mask == None:
+      return
+
+    image_id = self.get_current_mask_image()
+
+    if image_id == None or len(self.new_mask) < 6:
+      self.new_mask = None
+      w['bt_mask_add'].configure(state=tk.NORMAL)
+      cv.delete(cv.new_mask)
+      return
+
+    if image_id not in self.masks:
+      self.masks[image_id] = []
+
+    self.masks[image_id].append({
+      'mask': self.new_mask,
+      'type': w['sp_mask_add_type'].var.get()
+    })
+
+    self.new_mask = None
+    cv.new_mask = None
+
+    w['bt_mask_add'].configure(state=tk.NORMAL)
+    self.update_mask_canvas()
+    self.update_mask_list()
+
+
+  def update_mask_image_list(self):
+    tr = self.widgets['tr_mask_images']
+
+    for image_id in tr.get_children():
+      include = 0
+      exclude = 0
+
+      if image_id in self.masks:
+
+        for mask in self.masks[image_id]:
+          if mask['type'] == 'include':
+            include = include + 1
+          else:
+            exclude = exclude + 1
+
+      include = '' if include == 0 else include
+      exclude = '' if exclude == 0 else exclude
+
+      tr.set(image_id, 'include', include)
+      tr.set(image_id, 'exclude', exclude)
+
+
+
+  def update_mask_canvas(self):
+    """ update the mask canvas with the specified item_id/filepath """
+    cv = self.widgets['cv_image_masks']
+    cv.delete(tk.ALL)
+
+    image_id = self.get_current_mask_image()
+    if image_id == None:
+      return
+
+    width = cv.winfo_width()
+    height = cv.winfo_height()
+
+    # if size changed, clear buffer
+    hit = False
+    cache = self.mask_preview_cache
+
+    if cv.old_width != width or cv.old_height != height:
+      # clear cache
+      cache['slots'] = [None] * len(cache['slots'])
+      cv.old_width  = width
+      cv.old_height = height
+    else:
+      # check buffer
+      for item in cache['slots']:
+        if item and item['filename'] == image_id:
+          img = item['img']
+          hit = True
+          break
+
+    if hit == False:
+      img = Image.open(image_id)
+      img.thumbnail((width, height), Image.LANCZOS)
+      img = ImageTk.PhotoImage(img)
+
+      buffer_slot = cache['head'] % len(cache['slots'])
+      cache['slots'][buffer_slot] = {
+        'filename' : image_id,
+        'img'      : img
+      }
+      cache['head'] = (cache['head']+1) % len(cache['slots'])
+
+    cv.create_image(width/2, height/2, anchor=tk.CENTER, image=img)
+    cv.image = img
+
+    # add the masks of the image
+    if self.new_mask != None:
+      cv.new_mask = cv.create_polygon(self.new_mask, fill='', outline='#ffffff')
+
+    # add the existing masks of the current image
+    if image_id in self.masks:
+      self.draw_masks(self.masks[image_id], 1)
+
+
+
+  def draw_masks(self, masks, scale):
+    """ helper to add a list of masks on the canvas """
+    cv = self.widgets['cv_image_masks']
+
+    #print(self.masks[self.current_mask_image])
+    cv.masks = []
+    for mask in masks:
+      mask_color = self.config.get('prefs', 'mask_include_color')
+      if mask['type'] == 'exclude':
+        mask_color = self.config.get('prefs', 'mask_exclude_color')
+
+      cv.masks.append(cv.create_polygon(mask['mask'], fill='', outline=mask_color))
+
+
+
+  def update_mask_list(self):
+    w = self.widgets
+    tr = w['tr_masks']
+
+    # save the current selection
+    old_len = len(tr.get_children())
+    selection = tr.selection()
+
+    for item in tr.get_children():
+      tr.delete(item)
+
+    self.update_mask_image_list()
+
+    image_id = self.get_current_mask_image()
+
+    if image_id != None:
+      # add all the masks
+      if image_id in self.masks:
+        for i, mask in enumerate(self.masks[image_id]):
+          tr.insert('', tk.END, i+1, text='# ' + str(i+1), values=(mask['type']))
+
+      if old_len > 0 and old_len == len(tr.get_children()):
+        tr.selection_set(selection)
+
+    new_state = tk.DISABLED
+    if len(tr.selection()) > 0:
+      new_state = tk.NORMAL
+
+    w['bt_mask_include'].configure(state=new_state)
+    w['bt_mask_exclude'].configure(state=new_state)
+    w['bt_mask_delete'].configure(state=new_state)
+    w['bt_mask_copy'].configure(state=new_state)
+
 
 
   def update_output_image_preview(self):
@@ -666,6 +1114,7 @@ class App(tk.Tk):
       c.read('config.ini')
 
     c['DEFAULT'] = {
+      'rb_mask_type_include'    : 'include',
       'ck_align'                : 'True',
       'ck_autocrop'             : 'True',
       'ck_centershift'          : 'True',
@@ -700,7 +1149,9 @@ class App(tk.Tk):
       'sp_jpg_quality'          : '90',
       'cb_tif_compression'      : 'lzw',
 
-      'align_prefix'            : 'aligned__'
+      'align_prefix'            : 'aligned__',
+      'mask_include_color'      : '#55ff55',
+      'mask_exclude_color'      : '#5555ff'
     }
 
     if not c.has_section('prefs'):
