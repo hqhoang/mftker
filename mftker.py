@@ -14,6 +14,9 @@ import configparser
 import tempfile
 import subprocess
 import threading
+import collections
+import copy
+import math
 
 class App(tk.Tk):
 
@@ -30,6 +33,7 @@ class App(tk.Tk):
     }
     self.masks   = {}      # storage for masks, indexed by filepaths
     self.new_mask = None   # keep track of the mask being created
+    self.mask_clipboard = []  # clipboard for copying/pasting masks
 
     self.preview_cache = {
       'slots' : [None] * 5,
@@ -202,10 +206,11 @@ class App(tk.Tk):
     w['bt_mask_add'].grid(column=0, row=0, padx=5, pady=5, ipadx=3)
 
     v_sp_mask_add_type = tk.StringVar()
-    w['sp_mask_add_type'] = ttk.Spinbox(fr_mask_image_actions, values=('include', 'exclude'), wrap=True,
-                                        textvariable=v_sp_mask_add_type, width=8, state='readonly')
+    w['sp_mask_add_type'] = ttk.Spinbox(fr_mask_image_actions, values=('include', 'exclude'), justify=tk.CENTER,
+                                        wrap=True, textvariable=v_sp_mask_add_type, width=8, state='readonly')
     w['sp_mask_add_type'].grid(column=1, row=0)
     w['sp_mask_add_type'].var = v_sp_mask_add_type
+    w['sp_mask_add_type'].bind('<Button-1>', self.ui_sp_mask_add_type_b1)
 
     w['bt_mask_paste'] = ttk.Button(fr_mask_image_actions, text='Paste', command=self.paste_masks)
     w['bt_mask_paste'].grid(column=2, row=0, padx=10, pady=5, ipadx=3)
@@ -610,6 +615,13 @@ class App(tk.Tk):
     self.update_mask_canvas()
     self.update_mask_list()
 
+  def ui_sp_mask_add_type_b1(self, event):
+    sp = self.widgets['sp_mask_add_type']
+
+    if sp.var.get() == 'include':
+      sp.var.set('exclude')
+    else:
+      sp.var.set('include')
 
 
   def ui_tr_masks_selected(self, event):
@@ -838,11 +850,54 @@ class App(tk.Tk):
 
 
   def copy_masks(self):
-    return
+    w = self.widgets
+    selection = w['tr_masks'].selection()
+
+    image_id = self.get_current_mask_image()
+    if image_id == None:
+      return
+
+    # clear clipboard
+    self.mask_clipboard.clear()
+
+    for mask_index in selection:
+      self.mask_clipboard.append(copy.deepcopy(self.masks[image_id][int(mask_index)-1]))
+
+    # make the Paste button available
+    w['bt_mask_paste'].configure(state=tk.NORMAL)
 
 
   def paste_masks(self):
-    return
+    w = self.widgets
+
+    if len(self.mask_clipboard) == 0:
+      tk.messagebox.showinfo('Mask clipboard is empty.')
+      w['bt_mask_paste'].configure(state=tk.DISABLED)
+      return
+
+    selection = self.widgets['tr_mask_images'].selection()
+
+    for image_id in selection:
+      if image_id not in self.masks:
+        self.masks[image_id] = []
+
+      old_mask_count = len(self.masks[image_id])
+      for mask in self.mask_clipboard:
+        # avoid duplicate masks
+        has_duplicate = False
+        for i in range(old_mask_count):
+          old_mask = self.masks[image_id][i]
+          if collections.Counter(old_mask['mask']) == collections.Counter(mask['mask']):
+            old_mask['type'] = mask['type'] # update existing mask
+            has_duplicate = True
+            break
+
+        if has_duplicate == False:
+          self.masks[image_id].append(copy.deepcopy(mask))
+
+    self.update_mask_list()
+    self.update_mask_canvas()
+
 
 
   def clear_masks(self):
@@ -945,8 +1000,16 @@ class App(tk.Tk):
     if image_id not in self.masks:
       self.masks[image_id] = []
 
+
+    # map/scale the mask to full image width
+    mask = []
+
+    for i in range(math.floor(len(self.new_mask)/2)):
+      mask.append((self.new_mask[2*i] - cv.origin[0])/cv.image_scale)
+      mask.append((self.new_mask[2*i+1] - cv.origin[1])/cv.image_scale)
+
     self.masks[image_id].append({
-      'mask': self.new_mask,
+      'mask': mask,
       'type': w['sp_mask_add_type'].var.get()
     })
 
@@ -1006,24 +1069,32 @@ class App(tk.Tk):
       # check buffer
       for item in cache['slots']:
         if item and item['filename'] == image_id:
-          img = item['img']
+          tkimg = item['img']
           hit = True
           break
 
     if hit == False:
       img = Image.open(image_id)
+      img_full_width = img.width
+
       img.thumbnail((width, height), Image.LANCZOS)
-      img = ImageTk.PhotoImage(img)
+      cv.image_scale = img.width/img_full_width
+
+      tkimg = ImageTk.PhotoImage(img)
 
       buffer_slot = cache['head'] % len(cache['slots'])
       cache['slots'][buffer_slot] = {
         'filename' : image_id,
-        'img'      : img
+        'img'      : tkimg
       }
       cache['head'] = (cache['head']+1) % len(cache['slots'])
 
-    cv.create_image(width/2, height/2, anchor=tk.CENTER, image=img)
-    cv.image = img
+    cv_image = cv.create_image(width/2, height/2, anchor=tk.CENTER, image=tkimg)
+    cv.image = tkimg
+
+    # calculate the image top-left corner
+    img_center = cv.coords(cv_image)
+    cv.origin = (img_center[0] - tkimg.width()/2, img_center[1] - tkimg.height()/2)
 
     # add the masks of the image
     if self.new_mask != None:
@@ -1031,11 +1102,11 @@ class App(tk.Tk):
 
     # add the existing masks of the current image
     if image_id in self.masks:
-      self.draw_masks(self.masks[image_id], 1)
+      self.draw_masks(self.masks[image_id], cv.origin, cv.image_scale)
 
 
 
-  def draw_masks(self, masks, scale):
+  def draw_masks(self, masks, origin, scale):
     """ helper to add a list of masks on the canvas """
     cv = self.widgets['cv_image_masks']
 
@@ -1046,7 +1117,9 @@ class App(tk.Tk):
       if mask['type'] == 'exclude':
         mask_color = self.config.get('prefs', 'mask_exclude_color')
 
-      cv.masks.append(cv.create_polygon(mask['mask'], fill='', outline=mask_color))
+      cv.masks.append(
+        cv.create_polygon(self.scale_polygon(mask['mask'], cv.origin, scale),
+                          fill='', outline=mask_color))
 
 
 
@@ -1083,6 +1156,16 @@ class App(tk.Tk):
     w['bt_mask_delete'].configure(state=new_state)
     w['bt_mask_copy'].configure(state=new_state)
 
+
+
+  def scale_polygon(self, poly, new_origin, scale) :
+    p = []
+
+    for i in range(math.floor(len(poly)/2)):
+      p.append(poly[2*i]*scale + new_origin[0])
+      p.append(poly[2*i+1]*scale + new_origin[1])
+
+    return p
 
 
   def update_output_image_preview(self):
@@ -1366,6 +1449,7 @@ class App(tk.Tk):
       log_box.see(tk.END)
 
     self.returncode.set(p.returncode)
+
 
 
 if __name__ == "__main__":
