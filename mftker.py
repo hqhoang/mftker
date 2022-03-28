@@ -7,7 +7,7 @@ import tkinter as tk
 import tkinter.filedialog
 import tkinter.font
 from tkinter import ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 
 import os, sys
 import configparser
@@ -243,11 +243,11 @@ class App(tk.Tk):
     w['bt_mask_exclude'] = ttk.Button(fr_mask_actions, text='Exclude', command=self.set_masks_exclude)
     w['bt_mask_exclude'].grid(column=1, row=0, padx=5, pady=5, ipadx=3)
 
-    w['bt_mask_delete'] = ttk.Button(fr_mask_actions, text='Delete', command=self.delete_masks)
-    w['bt_mask_delete'].grid(column=2, row=0, padx=5, pady=5, ipadx=3)
-
     w['bt_mask_copy'] = ttk.Button(fr_mask_actions, text='Copy', command=self.copy_masks)
-    w['bt_mask_copy'].grid(column=3, row=0, padx=5, pady=5, ipadx=3)
+    w['bt_mask_copy'].grid(column=2, row=0, padx=5, pady=5, ipadx=3)
+
+    w['bt_mask_delete'] = ttk.Button(fr_mask_actions, text='Delete', command=self.delete_masks)
+    w['bt_mask_delete'].grid(column=3, row=0, padx=5, pady=5, ipadx=3)
 
 
     # canvas to draw masks
@@ -341,7 +341,7 @@ class App(tk.Tk):
     ttk.Label(fr_stack_align, text='Scale factor: ').grid(column=0, row=6, sticky=(tk.E), padx=20, pady=7)
 
     v_sp_scale_factor = tk.IntVar()
-    w['sp_scale_factor'] = ttk.Spinbox(fr_stack_align, from_=1, to=5, increment=1,
+    w['sp_scale_factor'] = ttk.Spinbox(fr_stack_align, from_=0, to=5, increment=1,
                                        justify=tk.CENTER, width=10, textvariable=v_sp_scale_factor)
     w['sp_scale_factor'].grid(column=1, row=6, sticky=(tk.W), padx=20, pady=7)
     w['sp_scale_factor'].var = v_sp_scale_factor
@@ -381,7 +381,7 @@ class App(tk.Tk):
     ttk.Label(fr_stack_fusion, text='Constrast window size: ').grid(column=0, row=2, sticky=(tk.E), padx=10, pady=7)
 
     v_sp_window_size = tk.IntVar()
-    w['sp_window_size'] = ttk.Spinbox(fr_stack_fusion, from_=3, to=50, increment=1,
+    w['sp_window_size'] = ttk.Spinbox(fr_stack_fusion, from_=3, to=50, increment=2,
                                       justify=tk.CENTER, width=10, textvariable=v_sp_window_size)
     w['sp_window_size'].grid(column=1, row=2, sticky=(tk.W), padx=20, pady=7)
     w['sp_window_size'].var = v_sp_window_size
@@ -396,14 +396,14 @@ class App(tk.Tk):
     fr_edge_scale = ttk.Frame(fr_stack_fusion)
     fr_edge_scale.grid(column=1, columnspan=2, row=3, sticky=(tk.EW))
 
-    v_sp_edge_scale = tk.IntVar()
-    w['sp_edge_scale'] = ttk.Spinbox(fr_edge_scale, from_=1, to=100, increment=1,
+    v_sp_edge_scale = tk.StringVar()
+    w['sp_edge_scale'] = ttk.Spinbox(fr_edge_scale, from_=0, to=100, increment=1,
                                      justify=tk.CENTER, width=5, textvariable=v_sp_edge_scale)
     w['sp_edge_scale'].grid(column=0, row=0, sticky=(tk.W), padx=20, pady=7)
     w['sp_edge_scale'].var = v_sp_edge_scale
 
-    v_sp_lce_scale = tk.IntVar()
-    w['sp_lce_scale'] = ttk.Spinbox(fr_edge_scale, from_=1, to=100, increment=1,
+    v_sp_lce_scale = tk.StringVar()
+    w['sp_lce_scale'] = ttk.Spinbox(fr_edge_scale, from_=0, to=100, increment=1,
                                     justify=tk.CENTER, width=5, textvariable=v_sp_lce_scale)
     w['sp_lce_scale'].grid(column=1, row=0, sticky=(tk.W), padx=0, pady=7)
     w['sp_lce_scale'].var = v_sp_lce_scale
@@ -414,8 +414,8 @@ class App(tk.Tk):
     w['ck_lce_scale'].grid(column=2, row=0, sticky=(tk.W), padx=5, pady=7)
     w['ck_lce_scale'].var = v_ck_lce_scale
 
-    v_sp_lce_level = tk.IntVar()
-    w['sp_lce_level'] = ttk.Spinbox(fr_edge_scale, from_=1, to=100, increment=1,
+    v_sp_lce_level = tk.StringVar()
+    w['sp_lce_level'] = ttk.Spinbox(fr_edge_scale, from_=0, to=100, increment=1,
                                     justify=tk.CENTER, width=5, textvariable=v_sp_lce_level)
     w['sp_lce_level'].grid(column=3, row=0, sticky=(tk.W), padx=0, pady=7)
     w['sp_lce_level'].var = v_sp_lce_level
@@ -433,8 +433,11 @@ class App(tk.Tk):
     w['ck_curvature'].grid(column=0, row=4, sticky=(tk.W), padx=10, pady=7)
     w['ck_curvature'].var = v_ck_curvature
 
-    w['sp_curvature'] = ttk.Spinbox(fr_stack_fusion, from_=1, to=100, increment=1, justify=tk.CENTER, width=10)
+    v_sp_curvature = tk.StringVar()
+    w['sp_curvature'] = ttk.Spinbox(fr_stack_fusion, from_=1, to=100, increment=1, justify=tk.CENTER,
+                                    width=10, textvariable=v_sp_curvature)
     w['sp_curvature'].grid(column=1, row=4, sticky=(tk.W), padx=20, pady=7)
+    w['sp_curvature'].var = v_sp_curvature
 
     v_ck_curvature_pc = tk.BooleanVar()
     w['ck_curvature_pc'] = ttk.Checkbutton(fr_stack_fusion, text='%', onvalue=True, offvalue=False,
@@ -541,6 +544,21 @@ class App(tk.Tk):
     w['cb_tif_compression'].var = v_cb_tif_compression
     w['cb_tif_compression'].bind('<<ComboboxSelected>>', lambda x : w['cb_tif_compression'].selection_clear())
 
+    fr_intermediate_files = ttk.Frame(fr_stack_output)
+    fr_intermediate_files.grid(column=0, columnspan=3, row=3, sticky=(tk.EW), padx=10, pady=7)
+
+    v_ck_keep_aligned = tk.BooleanVar()
+    w['ck_keep_aligned'] = ttk.Checkbutton(fr_intermediate_files, text='Keep aligned images',
+                                           onvalue=True, offvalue=False, variable=v_ck_keep_aligned)
+    w['ck_keep_aligned'].grid(column=0, row=0, sticky=(tk.EW, tk.N), padx=20, pady=7)
+    w['ck_keep_aligned'].var = v_ck_keep_aligned
+
+    v_ck_keep_masked = tk.BooleanVar()
+    w['ck_keep_masked'] = ttk.Checkbutton(fr_intermediate_files, text='Keep masked images',
+                                           onvalue=True, offvalue=False, variable=v_ck_keep_masked)
+    w['ck_keep_masked'].grid(column=1, row=0, sticky=(tk.EW, tk.N), padx=20, pady=7)
+    w['ck_keep_masked'].var = v_ck_keep_masked
+
     ttk.Frame(fr_stack_output).grid(column=0, row=3, pady=5)  # padding bottom
 
 
@@ -550,12 +568,11 @@ class App(tk.Tk):
     fr_stack_actions.columnconfigure(0, weight=1)
     fr_stack_actions.columnconfigure(1, weight=1)
 
+
     w['bt_stack'] = ttk.Button(fr_stack_actions, text='Stack', command=self.stack_images)
     w['bt_stack'].grid(column=0, row=0)
 
     ttk.Button(fr_stack_actions, text='Toggle log', command=self.toggle_log).grid(column=1, row=0, sticky=(tk.E))
-
-
 
     # stacked preview pane
     w['cv_stacked_preview'] = tk.Canvas(tab_stack, background='#eeeeee')
@@ -645,6 +662,7 @@ class App(tk.Tk):
     w['ck_centershift'].config(state=st)
     w['ck_fov'].config(state=st)
     w['sp_corr_threshold'].config(state=st)
+    w['sp_error_threshold'].config(state=st)
     w['sp_control_points'].config(state=st)
     w['sp_grid_size'].config(state=st)
     w['sp_scale_factor'].config(state=st)
@@ -1197,12 +1215,12 @@ class App(tk.Tk):
       c.read('config.ini')
 
     c['DEFAULT'] = {
-      'rb_mask_type_include'    : 'include',
+      'rb_mask_type_include'    : 'exclude',
       'ck_align'                : 'True',
       'ck_autocrop'             : 'True',
       'ck_centershift'          : 'True',
       'ck_fov'                  : 'True',
-      'sp_corr_threshold'       : '0.9',
+      'sp_corr_threshold'       : '0.95',
       'sp_error_threshold'      : '3',
       'sp_control_points'       : '10',
       'sp_grid_size'            : '5',
@@ -1231,6 +1249,8 @@ class App(tk.Tk):
       'cb_file_format'          : 'JPG',
       'sp_jpg_quality'          : '90',
       'cb_tif_compression'      : 'lzw',
+      'ck_keep_aligned'         : False,
+      'ck_keep_masked'          : False,
 
       'align_prefix'            : 'aligned__',
       'mask_include_color'      : '#55ff55',
@@ -1297,7 +1317,7 @@ class App(tk.Tk):
 
 
   def build_align_command(self):
-    cmd = ['align_image_stack', '-v', '-aaligned__', '--use-given-order']
+    cmd = ['align_image_stack', '-v', '-aaligned__', '--use-given-order', '--distortion', '--gpu']
 
     # get the alignment options
     w = self.widgets
@@ -1321,7 +1341,8 @@ class App(tk.Tk):
     return cmd
 
 
-  def build_enfuse_command(self):
+
+  def build_enfuse_command(self, images):
     cmd = ['enfuse', '-v', '-o', self.output_name,
            '--exposure-weight=0',
            '--saturation-weight=0',
@@ -1337,8 +1358,8 @@ class App(tk.Tk):
 
     if w['ck_edge_scale'].var.get():
       opt = str(w['sp_edge_scale'].var.get()) + ':'
-      opt = opt + str(w['sp_lce_scale'].var.get()) + '%' if w['ck_lce_scale'].var.get() else ''
-      opt = opt + ':' + str(w['sp_lce_level'].var.get()) + '%' if w['ck_lce_level'].var.get() else ''
+      opt += str(w['sp_lce_scale'].var.get()) + ('%' if w['ck_lce_scale'].var.get() else '')
+      opt += ':' + str(w['sp_lce_level'].var.get()) + ('%' if w['ck_lce_level'].var.get() else '')
       cmd.append('--contrast-edge-scale=' + opt)
 
     if w['ck_curvature'].var.get():
@@ -1353,12 +1374,70 @@ class App(tk.Tk):
     else:
       cmd.append('--compression=' + str(w['cb_tif_compression'].var.get()))
 
-    if w['ck_align'].var.get():
-      cmd = cmd + self.aligned_images
-    else:
-      cmd = cmd + self.input_images
-
+    cmd = cmd + images
     return cmd
+
+
+
+  def apply_masks_to_images(self, images):
+    """ applied masks to images, assuming that they are aligned """
+    masked_images = []
+
+    # images might have different filename/path from original input
+    images_map = {}
+    for i, filepath in enumerate(self.input_images):
+      images_map[filepath] = images[i]
+
+    # each "include" mask is equivalent to "exclude" masks for each of the other images
+    file_masks = copy.deepcopy(self.masks)
+
+    for filepath in self.masks:
+      for mask in file_masks[filepath]:
+        if mask['type'] == 'include':
+          for other_filepath in self.input_images:
+            if filepath != other_filepath:
+              exclude_mask = copy.deepcopy(mask)
+              exclude_mask['type'] = 'exclude'
+
+              if other_filepath not in file_masks:
+                file_masks[other_filepath] = []
+
+              file_masks[other_filepath].append(exclude_mask)
+
+    for filepath in self.input_images:
+      # important: treat every image as having mask. Our outputs might have
+      # different format/setting than the original, don't mix them
+      img  = Image.open(images_map[filepath])
+      rgba = Image.new('RGBA', img.size)
+
+      mask_layer = Image.new('RGBA', img.size)
+      pdraw = ImageDraw.Draw(mask_layer)
+
+      # include the whole image by default
+      pdraw.rectangle([(0,0),img.size], fill=(255,255,255,255), outline=(255,255,255,255))
+
+      if filepath in file_masks:
+        for mask in file_masks[filepath]:
+          if mask['type'] == 'exclude':
+            pdraw.polygon(mask['mask'], fill=(255,255,255,0), outline=(255,255,255,0))
+
+        # add include mask after exclude masks
+        for mask in file_masks[filepath]:
+          if mask['type'] == 'include':
+            pdraw.polygon(mask['mask'], fill=(255,255,255,255), outline=(255,255,255,255))
+
+      rgba.paste(img, (0,0), mask=mask_layer)
+
+      new_path = os.path.join(
+        os.path.dirname(images_map[filepath]),
+        'masked_' + os.path.splitext(os.path.basename(images_map[filepath]))[0] + '.tif'
+      )
+
+      rgba.save(new_path)
+      masked_images.append(new_path)
+
+    return masked_images
+
 
 
   def stack_images(self):
@@ -1408,8 +1487,29 @@ class App(tk.Tk):
         tk.messagebox.showerror(message='Error aligning images, please check output log.')
         return
 
+    if w['ck_align'].var.get():
+      images = self.aligned_images
+    else:
+      images = self.input_images
 
-    enfuse_cmd = self.build_enfuse_command()
+    # generate masked images
+    has_mask = False
+    for filepath in self.masks:
+      for mask in self.masks[filepath]:
+        has_mask = True
+        break
+      if has_mask == True:
+        break
+
+    if not has_mask:
+      w['tx_log'].insert(tk.END, '\n\n===== NO MASK FOUND =====\n\n')
+    else:
+      images = self.apply_masks_to_images(images)
+      w['tx_log'].insert(tk.END, '\n\n===== MASKS APPLIED =====\n\n')
+
+
+    # call enfuse
+    enfuse_cmd = self.build_enfuse_command(images)
     print(enfuse_cmd)
 
     w['tx_log'].insert(tk.END, '\n\n===== CALLING ENFUSE =====\n')
@@ -1431,9 +1531,18 @@ class App(tk.Tk):
     self.toggle_log(False)
 
     # clean up aligned TIFFs
-    if w['ck_align'].var.get():
+    if w['ck_align'].var.get() and not w['ck_keep_aligned'].var.get():
       for filename in self.aligned_images:
         os.remove(filename)
+      w['tx_log'].insert(tk.END, '\nRemoved aligned images \n\n')
+      w['tx_log'].see(tk.END)
+
+    # clean up masked TIFFs
+    if has_mask and not w['ck_keep_masked']:
+      for filename in images:
+        os.remove(filename)
+      w['tx_log'].insert(tk.END, '\nRemoved masked images \n\n')
+      w['tx_log'].see(tk.END)
 
 
 
