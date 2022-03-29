@@ -8,17 +8,18 @@ import tkinter.filedialog
 import tkinter.font
 from tkinter import ttk
 from PIL import Image, ImageTk, ImageDraw
+from tkinterdnd2 import DND_FILES, TkinterDnD
 
-import os, sys
+import os
+from shutil import which
 import configparser
-import tempfile
 import subprocess
 import threading
 import collections
 import copy
 import math
 
-class App(tk.Tk):
+class App(TkinterDnD.Tk):
 
 
   def __init__(self):
@@ -35,6 +36,8 @@ class App(tk.Tk):
     self.new_mask = None   # keep track of the mask being created
     self.mask_clipboard = []  # clipboard for copying/pasting masks
 
+    self.output_image = None
+
     self.preview_cache = {
       'slots' : [None] * 5,
       'head'   : 0,
@@ -46,7 +49,6 @@ class App(tk.Tk):
       'slots' : [None] * 5,
       'head'   : 0,
     }
-
 
 
 
@@ -69,6 +71,7 @@ class App(tk.Tk):
     style.configure('TFrame', background='#f8f8f8')
     style.configure('TLabelframe', background='#f8f8f8', labelmargins=10, padding=0)
     style.configure('TLabelframe.Label', background='#f8f8f8')
+    style.configure('Treeview', rowheight=25)
     style.configure('TCheckbutton', background='#f8f8f8')
     style.configure('TRadiobutton', background='#f8f8f8')
     style.configure('TLabel', background='#f8f8f8')
@@ -128,14 +131,16 @@ class App(tk.Tk):
     fr_images.rowconfigure(0, weight=1)
 
     # image list
-    w['lb_images'] = tk.Listbox(fr_images, selectmode=tk.EXTENDED)
-    w['lb_images'].grid(column=0, row=0, sticky=(tk.NS, tk.EW))
-    w['lb_images'].bind('<<ListboxSelect>>', self.ui_lb_images_selected)
+    w['tr_images'] = ttk.Treeview(fr_images, selectmode=tk.EXTENDED)
+    w['tr_images'].grid(column=0, row=0, sticky=(tk.NS, tk.EW))
+    w['tr_images'].bind('<<TreeviewSelect>>', self.ui_tr_images_selected)
+    self.drop_target_register(DND_FILES)
+    self.dnd_bind('<<Drop>>', self.add_images_from_drop)
 
     # scrollbar for image list
-    s = ttk.Scrollbar(fr_images, orient=tk.VERTICAL, command=w['lb_images'].yview)
+    s = ttk.Scrollbar(fr_images, orient=tk.VERTICAL, command=w['tr_images'].yview)
     s.grid(column=1, row=0, sticky=(tk.NS))
-    w['lb_images']['yscrollcommand'] = s.set
+    w['tr_images']['yscrollcommand'] = s.set
 
     # preview pane
     w['cv_image_preview'] = tk.Canvas(pn_tabimages, background='#eeeeee')
@@ -146,7 +151,7 @@ class App(tk.Tk):
     fr_image_actions = ttk.Frame(tab_images)
     fr_image_actions.grid(column=0, row=1, sticky=(tk.S, tk.EW))
 
-    w['bt_image_add'] = ttk.Button(fr_image_actions, text='Add images', command=self.add_images)
+    w['bt_image_add'] = ttk.Button(fr_image_actions, text='Add images', command=self.ui_bt_image_add)
     w['bt_image_add'].grid(column=0, row=0, padx=10, pady=10, ipadx=3)
 
     w['bt_image_remove'] = ttk.Button(fr_image_actions, text='Remove selected', command=self.remove_images)
@@ -567,12 +572,16 @@ class App(tk.Tk):
     fr_stack_actions.grid(column=0, row=5, sticky=(tk.N, tk.EW), pady=20)
     fr_stack_actions.columnconfigure(0, weight=1)
     fr_stack_actions.columnconfigure(1, weight=1)
+    fr_stack_actions.columnconfigure(2, weight=1)
 
 
     w['bt_stack'] = ttk.Button(fr_stack_actions, text='Stack', command=self.stack_images)
     w['bt_stack'].grid(column=0, row=0)
 
-    ttk.Button(fr_stack_actions, text='Toggle log', command=self.toggle_log).grid(column=1, row=0, sticky=(tk.E))
+    w['bt_cancel_stack'] = ttk.Button(fr_stack_actions, text='Cancel', command=self.cancel_stack_images)
+    w['bt_cancel_stack'].grid(column=1, row=0)
+
+    ttk.Button(fr_stack_actions, text='Toggle log', command=self.toggle_log).grid(column=2, row=0, sticky=(tk.E))
 
     # stacked preview pane
     w['cv_stacked_preview'] = tk.Canvas(tab_stack, background='#eeeeee')
@@ -607,14 +616,23 @@ class App(tk.Tk):
     w['bt_mask_delete'].configure(state=tk.DISABLED)
     w['bt_mask_copy'].configure(state=tk.DISABLED)
 
+    w['bt_cancel_stack'].configure(state=tk.DISABLED)
+
+
+    # check for availability of the required commands/executes
+    for cmd in ['align_image_stack', 'enfuse', 'exiftool']:
+      if which(cmd) is None:
+        tk.messagebox.showerror(message='Cannot find "' + cmd + '".\nPlease specify the file location manually.')
+
+        # @TODO: show the preferences panel
 
 
 
 
   # ==== Event handlers for widgets ====
 
-  def ui_lb_images_selected(self, event):
-    if len(self.widgets['lb_images'].curselection()) > 0:
+  def ui_tr_images_selected(self, event):
+    if len(self.widgets['tr_images'].selection()) > 0:
       self.widgets['bt_image_remove'].configure(state=tk.NORMAL)
     self.update_input_image_preview()
 
@@ -644,13 +662,16 @@ class App(tk.Tk):
   def ui_tr_masks_selected(self, event):
     w = self.widgets
 
-    if len(w['tr_masks'].selection()) > 0:
+    selection = w['tr_masks'].selection()
+
+    if len(selection) > 0:
       w['bt_mask_include'].configure(state=tk.NORMAL)
       w['bt_mask_exclude'].configure(state=tk.NORMAL)
       w['bt_mask_delete'].configure(state=tk.NORMAL)
       w['bt_mask_copy'].configure(state=tk.NORMAL)
 
-
+    # if one mask selected, make it editable
+    self.update_mask_canvas()
 
   def ui_ck_align_changed(self):
     w = self.widgets
@@ -739,8 +760,7 @@ class App(tk.Tk):
       w['cv_stacked_preview'].grid()
 
 
-  def add_images(self):
-    w = self.widgets
+  def ui_bt_image_add(self):
     c = self.config
     initial_dir = '~'
 
@@ -755,30 +775,50 @@ class App(tk.Tk):
               ('image', '.tiff')
             ])
 
+    self.add_images(filepaths)
+
+
+  def add_images_from_drop(self, event):
+    w = self.widgets
+
+    filepaths = w['tr_images'].tk.splitlist(event.data)
+    self.add_images(filepaths)
+
+    w['nb'].select(0)
+
+
+
+  def add_images(self, filepaths):
     if len(filepaths) == 0:
       return
 
     # save the current location
-    c.set('prefs', 'last_opened_location', os.path.dirname(filepaths[0]))
+    self.config.set('prefs', 'last_opened_location', os.path.dirname(filepaths[0]))
 
     # update the image list in Images and Stacks tabs
+    w = self.widgets
     for filepath in filepaths:
+      if filepath in self.input_images:
+        continue
+
       filename = os.path.basename(filepath)
 
-      w['lb_images'].insert(tk.END, ' ' + filename)
+      w['tr_images'].insert('', tk.END, filepath, text=filename)
       self.input_images.append(filepath)
 
       w['tr_mask_images'].insert('', tk.END, filepath, text=filename)
 
 
+
   def remove_images(self):
     w = self.widgets
-    selection = w['lb_images'].curselection()
+    selection = w['tr_images'].selection()
 
-    for i in reversed(selection):
-      filepath = self.input_images.pop(i)
-      w['lb_images'].delete(i)
-      w['tr_mask_images'].delete(filepath)
+    for image_id in selection:
+      w['tr_images'].delete(image_id)
+      w['tr_mask_images'].delete(image_id)
+
+    self.input_images = list(set(self.input_images).difference(set(selection)))
 
     w['bt_image_remove'].configure(state=tk.DISABLED)
 
@@ -789,7 +829,7 @@ class App(tk.Tk):
   def get_current_input_image(self):
     """ helper to get the currently selected input image.
     Return None if no image or multiple images selected """
-    selection = self.widgets['lb_images'].curselection()
+    selection = self.widgets['tr_images'].selection()
 
     if len(selection) != 1:
       return None
@@ -802,13 +842,13 @@ class App(tk.Tk):
     """ update the preview with the specified image at index """
     cv = self.widgets['cv_image_preview']
 
-    selection = self.widgets['lb_images'].curselection()
+    selection = self.widgets['tr_images'].selection()
 
     if len(selection) != 1:
       cv.delete(tk.ALL)
       return
 
-    index = selection[0]
+    image_id = selection[0]
 
     width = cv.winfo_width()
     height = cv.winfo_height()
@@ -824,19 +864,19 @@ class App(tk.Tk):
     else:
       # check buffer
       for item in cache['slots']:
-        if item and item['filename'] == self.input_images[index]:
+        if item and item['filename'] == image_id:
           img = item['img']
           hit = True
           break
 
     if hit == False:
-      img = Image.open(self.input_images[index])
+      img = Image.open(image_id)
       img.thumbnail((width, height), Image.LANCZOS)
       img = ImageTk.PhotoImage(img)
 
       buffer_slot = cache['head'] % len(cache['slots'])
       cache['slots'][buffer_slot] = {
-        'filename' : self.input_images[index],
+        'filename' : image_id,
         'img'      : img
       }
       cache['head'] = (cache['head']+1) % len(cache['slots'])
@@ -862,7 +902,7 @@ class App(tk.Tk):
 
     # add a place holder for cv.new_mask
     cv = self.widgets['cv_image_masks']
-    cv.new_mask = cv.create_line(0, 0, 0, 0, fill='')
+    cv.new_mask = cv.create_line(0, 0, 0, 0, fill='#ffffff')
 
     self.widgets['bt_mask_add'].configure(state=tk.DISABLED)
 
@@ -871,15 +911,12 @@ class App(tk.Tk):
     w = self.widgets
     selection = w['tr_masks'].selection()
 
-    image_id = self.get_current_mask_image()
-    if image_id == None:
-      return
-
     # clear clipboard
     self.mask_clipboard.clear()
 
-    for mask_index in selection:
-      self.mask_clipboard.append(copy.deepcopy(self.masks[image_id][int(mask_index)-1]))
+    for mask_id in selection:
+      image_id, index = mask_id.split('|')
+      self.mask_clipboard.append(copy.deepcopy(self.masks[image_id][int(index)]))
 
     # make the Paste button available
     w['bt_mask_paste'].configure(state=tk.NORMAL)
@@ -933,12 +970,9 @@ class App(tk.Tk):
     w = self.widgets
     selection = w['tr_masks'].selection()
 
-    image_id = self.get_current_mask_image()
-    if image_id == None:
-      return
-
-    for mask_index in reversed(selection):
-      self.masks[image_id].pop(int(mask_index)-1)
+    for mask_id in reversed(selection):
+      image_id, mask_index = mask_id.split('|')
+      self.masks[image_id].pop(int(mask_index))
 
     self.update_mask_list()
     self.update_mask_canvas()
@@ -948,12 +982,9 @@ class App(tk.Tk):
     w = self.widgets
     selection = w['tr_masks'].selection()
 
-    image_id = self.get_current_mask_image()
-    if image_id == None:
-      return
-
-    for mask_index in selection:
-      mask = self.masks[image_id][int(mask_index)-1]
+    for mask_id in selection:
+      image_id, mask_index = mask_id.split('|')
+      mask = self.masks[image_id][int(mask_index)]
       mask['type'] = 'include'
 
     self.update_mask_list()
@@ -964,12 +995,9 @@ class App(tk.Tk):
     w = self.widgets
     selection = w['tr_masks'].selection()
 
-    image_id = self.get_current_mask_image()
-    if image_id == None:
-      return
-
-    for mask_index in selection:
-      mask = self.masks[image_id][int(mask_index)-1]
+    for mask_id in selection:
+      image_id, mask_index = mask_id.split('|')
+      mask = self.masks[image_id][int(mask_index)]
       mask['type'] = 'exclude'
 
     self.update_mask_list()
@@ -979,24 +1007,55 @@ class App(tk.Tk):
   def ui_cv_image_masks_b1(self, event):
     cv = self.widgets['cv_image_masks']
 
-    # handle mask creation
     if self.new_mask != None:
-      self.new_mask = self.new_mask + [event.x, event.y]
-      cv.delete(cv.new_mask)
-      cv.new_mask = cv.create_polygon(self.new_mask + [event.x, event.y], fill='', outline='#ffffff')
+      # handle mask creation
+      self.new_mask += [event.x, event.y]
+
+      if len(self.new_mask) <= 6:
+        self.ui_cv_image_masks_motion(event)
+        return
+
+      cv.coords(cv.new_mask, self.new_mask)
+      return
+
+    # select a mask
+    current_item = cv.find_closest(event.x, event.y, halo=None, start=None)
+
+    if len(current_item) == 0:
+       return
+
+    if cv.type(current_item[0]) == 'polygon':
+      if cv.masks[current_item[0]] == 'editable':
+        return
+
+      self.widgets['tr_masks'].selection_set(cv.masks[current_item[0]])
 
 
   def ui_cv_image_masks_motion(self, event):
-    if self.new_mask != None and len(self.new_mask) > 0:
-      cv = self.widgets['cv_image_masks']
+    cv = self.widgets['cv_image_masks']
 
-      if len(self.new_mask) == 2:
-        cv.delete(cv.new_mask)
-        cv.new_mask = cv.create_line(self.new_mask + [event.x, event.y], fill='#ffffff')
-      else:
-        cv.delete(cv.new_mask)
-        cv.new_mask = cv.create_polygon(self.new_mask + [event.x, event.y], fill='', outline='#ffffff')
+    # set mouse cursor
+    current_item = cv.find_closest(event.x, event.y, halo=None, start=None)
 
+    if len(current_item) == 0:
+      return
+
+    if cv.type(current_item[0]) == 'oval':
+      cv.config(cursor='hand1')
+    else:
+      cv.config(cursor='')
+
+    if self.new_mask == None or len(self.new_mask) == 0:
+      return
+
+    node_count = len(self.new_mask)
+    if node_count <= 2:
+        cv.coords(cv.new_mask, self.new_mask + [event.x, event.y])
+    elif node_count == 4:
+      cv.delete(cv.new_mask)
+      cv.new_mask = cv.create_polygon(self.new_mask + [event.x, event.y], fill='', outline='#ffffff')
+    else:
+      cv.coords(cv.new_mask, self.new_mask + [event.x, event.y])
 
 
   def end_new_mask(self, event):
@@ -1020,11 +1079,7 @@ class App(tk.Tk):
 
 
     # map/scale the mask to full image width
-    mask = []
-
-    for i in range(math.floor(len(self.new_mask)/2)):
-      mask.append((self.new_mask[2*i] - cv.origin[0])/cv.image_scale)
-      mask.append((self.new_mask[2*i+1] - cv.origin[1])/cv.image_scale)
+    mask = self.unscale_polygon(self.new_mask, cv.origin, cv.image_scale)
 
     self.masks[image_id].append({
       'mask': mask,
@@ -1126,18 +1181,144 @@ class App(tk.Tk):
 
   def draw_masks(self, masks, origin, scale):
     """ helper to add a list of masks on the canvas """
-    cv = self.widgets['cv_image_masks']
+    w = self.widgets
+    cv = w['cv_image_masks']
+
+    # make the currently selected mask editable
+    editable_mask = None
+    selection = w['tr_masks'].selection()
+    if len(selection) == 1:
+      editable_mask = selection[0]
 
     #print(self.masks[self.current_mask_image])
-    cv.masks = []
-    for mask in masks:
+    cv.masks ={}
+    image_id = self.get_current_mask_image()
+
+    for i, mask in enumerate(masks):
       mask_color = self.config.get('prefs', 'mask_include_color')
       if mask['type'] == 'exclude':
         mask_color = self.config.get('prefs', 'mask_exclude_color')
 
-      cv.masks.append(
-        cv.create_polygon(self.scale_polygon(mask['mask'], cv.origin, scale),
-                          fill='', outline=mask_color))
+      if editable_mask != None and editable_mask == (image_id + '|' + str(i)):
+        cv.editable_mask = {
+          'mask_id':str(i + 1),
+          'mask': mask,
+          'polygon': None
+        }
+        self.draw_editable_mask()
+      else:
+        object_id = cv.create_polygon(self.scale_polygon(mask['mask'], cv.origin, scale),
+                                      fill='', outline=mask_color)
+        cv.masks[object_id] = image_id + '|' + str(i)  # revert mapping back to the mask
+
+    # bring the editable mask up top (after drawing all masks)
+    if editable_mask != None and cv.editable_mask['polygon'] != None:
+      cv.tag_raise(cv.editable_mask['polygon'])
+      cv.tag_raise('handle')
+
+
+
+  def draw_editable_mask(self):
+    cv = self.widgets['cv_image_masks']
+
+    if not cv.editable_mask:
+      return
+
+    # remove current editable mask and handles
+    if 'polygon' in cv.editable_mask and cv.editable_mask['polygon'] != None:
+      cv.delete(cv.editable_mask['polygon'])
+
+    mask = cv.editable_mask['mask']
+    points = self.scale_polygon(mask['mask'], cv.origin, cv.image_scale)
+
+    # create the mask
+    p = cv.create_polygon(points, fill='', outline='#ffffff', tags=('editable'))
+    cv.masks[p] = 'editable'
+    cv.editable_mask['polygon'] = p
+
+    cv.tag_bind(p, '<ButtonPress-1>',   lambda event, tag=p: self.mask_canvas_on_press_tag(event, tag))
+    cv.tag_bind(p, '<ButtonRelease-1>', self.mask_canvas_on_release_tag)
+    cv.tag_bind(p, '<B1-Motion>', self.mask_canvas_on_move_polygon)
+
+    # add handles for editable mask
+    handle_size = 5
+    cv.editable_mask['handles'] = []
+    for i in range(math.floor(len(points)/2)):
+      handle = cv.create_oval(points[2*i]-handle_size, points[2*i+1]-handle_size,
+                              points[2*i]+handle_size, points[2*i+1]+handle_size,
+                              fill='#ffffff', outline='#ffffff', tags=('handle'))
+      cv.editable_mask['handles'].append(handle)
+      cv.tag_bind(handle, '<ButtonPress-1>',   lambda event, tag=handle: self.mask_canvas_on_press_tag(event, tag))
+      cv.tag_bind(handle, '<ButtonRelease-1>', self.mask_canvas_on_release_tag)
+      cv.tag_bind(handle, '<B1-Motion>', lambda event, number=i: self.mask_canvas_on_move_handle(event, number))
+
+
+  def mask_canvas_on_press_tag(self, event, tag):
+    cv = self.widgets['cv_image_masks']
+    cv.editable_mask['selected'] = tag
+    cv.editable_mask['previous_x'] = event.x
+    cv.editable_mask['previous_y'] = event.y
+
+
+  def mask_canvas_on_release_tag(self, event):
+    cv = self.widgets['cv_image_masks']
+    cv.editable_mask['selected'] = None
+    cv.editable_mask['previous_x'] = None
+    cv.editable_mask['previous_y'] = None
+
+
+  def mask_canvas_on_move_polygon(self, event):
+    ''' move editable mask polygon and handles '''
+    cv= self.widgets['cv_image_masks']
+
+    if cv.editable_mask['selected']:
+      dx = event.x - cv.editable_mask['previous_x']
+      dy = event.y - cv.editable_mask['previous_y']
+
+      # move polygon
+      cv.move(cv.editable_mask['selected'], dx, dy)
+
+      # move handles
+      for handle in cv.editable_mask['handles']:
+        cv.move(handle, dx, dy)
+
+      # update mask data
+      points = self.scale_polygon(cv.editable_mask['mask']['mask'], cv.origin, cv.image_scale)
+
+      for i in range(math.floor(len(points)/2)):
+        points[2*i]   += dx
+        points[2*i+1] += dy
+
+      cv.editable_mask['mask']['mask'] = self.unscale_polygon(points, cv.origin, cv.image_scale)
+
+      cv.editable_mask['previous_x'] = event.x
+      cv.editable_mask['previous_y'] = event.y
+
+
+  def mask_canvas_on_move_handle(self, event, number):
+    '''move single hadnle of mask polygon'''
+    cv= self.widgets['cv_image_masks']
+
+    if cv.editable_mask['selected']:
+      dx = event.x - cv.editable_mask['previous_x']
+      dy = event.y - cv.editable_mask['previous_y']
+
+      # move handle
+      cv.move(cv.editable_mask['selected'], dx, dy)
+
+      # update mask data
+      points = self.scale_polygon(cv.editable_mask['mask']['mask'], cv.origin, cv.image_scale)
+
+      points[2*number]    += dx
+      points[2*number+1]  += dy
+
+      cv.editable_mask['mask']['mask'] = self.unscale_polygon(points, cv.origin, cv.image_scale)
+
+      # update mask polygon
+      cv.coords(cv.editable_mask['polygon'], points)
+
+      cv.editable_mask['previous_x'] = event.x
+      cv.editable_mask['previous_y'] = event.y
 
 
 
@@ -1146,7 +1327,6 @@ class App(tk.Tk):
     tr = w['tr_masks']
 
     # save the current selection
-    old_len = len(tr.get_children())
     selection = tr.selection()
 
     for item in tr.get_children():
@@ -1160,10 +1340,12 @@ class App(tk.Tk):
       # add all the masks
       if image_id in self.masks:
         for i, mask in enumerate(self.masks[image_id]):
-          tr.insert('', tk.END, i+1, text='# ' + str(i+1), values=(mask['type']))
+          tr.insert('', tk.END, image_id + '|' + str(i), text='# ' + str(i+1), values=(mask['type']))
 
-      if old_len > 0 and old_len == len(tr.get_children()):
+      try:
         tr.selection_set(selection)
+      except:
+        pass
 
     new_state = tk.DISABLED
     if len(tr.selection()) > 0:
@@ -1176,30 +1358,42 @@ class App(tk.Tk):
 
 
 
-  def scale_polygon(self, poly, new_origin, scale) :
+  def scale_polygon(self, poly, new_origin, new_scale) :
+    ''' calculate the point of a polygon at specified scale and origin '''
     p = []
 
     for i in range(math.floor(len(poly)/2)):
-      p.append(poly[2*i]*scale + new_origin[0])
-      p.append(poly[2*i+1]*scale + new_origin[1])
+      p.append(poly[2*i]*new_scale + new_origin[0])
+      p.append(poly[2*i+1]*new_scale + new_origin[1])
+
+    return p
+
+
+  def unscale_polygon(self, poly, current_origin, current_scale):
+    ''' Calculate the points of a polygon at actual/image scale '''
+    p = []
+
+    for i in range(math.floor(len(poly)/2)):
+      p.append((poly[2*i]   - current_origin[0])/current_scale)
+      p.append((poly[2*i+1] - current_origin[1])/current_scale)
 
     return p
 
 
   def update_output_image_preview(self):
+    cv = self.widgets['cv_stacked_preview']
+    cv.delete(tk.ALL)
+
     if len(self.input_images) == 0:
       return
 
-    cv = self.widgets['cv_stacked_preview']
+    if self.output_image == None:
+       return
+
     width = cv.winfo_width()
     height = cv.winfo_height()
 
-    output_file = os.path.join(
-      os.path.basename(self.input_images[0]),
-      self.output_name
-    )
-
-    img = Image.open(output_file)
+    img = Image.open(self.output_image)
     img.thumbnail((width, height), Image.LANCZOS)
     img = ImageTk.PhotoImage(img)
 
@@ -1463,9 +1657,16 @@ class App(tk.Tk):
     if not self.output_name:
       return
 
+    w['bt_stack'].configure(state=tk.DISABLED)
+    w['bt_cancel_stack'].configure(state=tk.NORMAL)
+
     w['tx_log'].delete(1.0, tk.END)
     self.toggle_log(True)
 
+    self.output_image = None
+    self.update_output_image_preview()
+
+    self.stack_cancelled = False
     self.returncode = tk.IntVar()
 
     if w['ck_align'].var.get():
@@ -1486,6 +1687,9 @@ class App(tk.Tk):
       if self.returncode.get() > 0:
         tk.messagebox.showerror(message='Error aligning images, please check output log.')
         return
+
+    if self.stack_cancelled == True:
+      return
 
     if w['ck_align'].var.get():
       images = self.aligned_images
@@ -1519,6 +1723,9 @@ class App(tk.Tk):
     threading.Thread(target=self.execute_cmd, args=[enfuse_cmd], daemon=True).start()
     self.wait_variable(self.returncode)
 
+    if self.stack_cancelled == True:
+      return
+
     if self.returncode.get() > 0:
       tk.messagebox.showerror(message='Error stacking images, please check output log.')
       return
@@ -1526,9 +1733,14 @@ class App(tk.Tk):
     w['tx_log'].insert(tk.END, '\nDone stacking to ' + self.output_name + '\n\n')
     w['tx_log'].see(tk.END)
 
-    # load the output file into the result pane
-    self.update_output_image_preview()
-    self.toggle_log(False)
+
+    # copy EXIF
+    w['tx_log'].insert(tk.END, '\nCopying EXIF from ' + self.input_images[0] + ' to ' + self.output_name + '\n\n')
+    w['tx_log'].see(tk.END)
+
+    exiftool_cmd = ['exiftool', '-TagsFromFile', self.input_images[0],
+                    '-all:all', '-overwrite_original', self.output_name]
+    self.execute_cmd(exiftool_cmd)
 
     # clean up aligned TIFFs
     if w['ck_align'].var.get() and not w['ck_keep_aligned'].var.get():
@@ -1545,18 +1757,49 @@ class App(tk.Tk):
       w['tx_log'].see(tk.END)
 
 
+    # load the output file into the result pane
+    self.output_image = os.path.join(
+      os.path.basename(self.input_images[0]),
+      self.output_name
+    )
+
+    self.update_output_image_preview()
+    self.toggle_log(False)
+
+    w['bt_cancel_stack'].configure(state=tk.DISABLED)
+    w['bt_stack'].configure(state=tk.NORMAL)
+
+
+
+  def cancel_stack_images(self):
+    w = self.widgets
+    self.stack_cancelled = True
+    self.output_name = None
+
+    w['bt_cancel_stack'].configure(state=tk.DISABLED)
+    w['bt_stack'].configure(state=tk.NORMAL)
+
+    if self.subprocess:
+      self.subprocess.kill()
+
+    w['tx_log'].insert(tk.END, '\n\nStacking cancelled by user.\n\n')
+    w['tx_log'].see(tk.END)
+
+
 
   def execute_cmd(self, cmd):
     log_box = self.widgets['tx_log']
     working_dir = os.path.dirname(self.input_images[0])
 
     p = subprocess.Popen(cmd, cwd=working_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    self.subprocess = p
 
     while p.poll() is None:
       msg = p.stdout.readline()
       log_box.insert(tk.END, msg)
       log_box.see(tk.END)
 
+    self.subprocess = None
     self.returncode.set(p.returncode)
 
 
