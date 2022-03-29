@@ -97,18 +97,21 @@ class App(TkinterDnD.Tk):
     tab_images = ttk.Frame(nb)
     tab_masks  = ttk.Frame(nb)
     tab_stack  = ttk.Frame(nb)
+    tab_prefs  = ttk.Frame(nb)
 
     tab_images.grid(column=0, row=0, sticky=(tk.NS, tk.EW))
     tab_masks.grid(column=0, row=0, sticky=(tk.NS, tk.EW))
     tab_stack.grid(column=0, row=0, sticky=(tk.NS, tk.EW))
+    tab_prefs.grid(column=0, row=0, sticky=(tk.NS, tk.EW))
 
     nb.add(tab_images, text='Images')
     nb.add(tab_masks, text='Masks')
     nb.add(tab_stack, text='Stack')
+    nb.add(tab_prefs, text='Preferences')
 
 
     # add top-level buttons
-    ttk.Button(container, text='Preferences').grid(column=2, row=0, sticky=(tk.E, tk.N), padx=10)
+    # ttk.Button(container, text='Placeholder').grid(column=2, row=0, sticky=(tk.E, tk.N), padx=10)
 
 
     w = self.widgets # shorthand
@@ -601,6 +604,101 @@ class App(TkinterDnD.Tk):
     w['tx_log'].scroll = s
 
 
+    # ==== preferences panel ====
+    tab_prefs.rowconfigure(5, weight=1)
+    tab_prefs.columnconfigure(1, weight=1)
+
+    # path to the required tools
+    fr_prefs_exec = ttk.Labelframe(tab_prefs, text='Program/Execute')
+    fr_prefs_exec.grid(column=0, row=0, sticky=(tk.N, tk.EW), pady=(0, 20))
+
+    # align_image_stack exec
+    ttk.Label(fr_prefs_exec, text='   align_image_stack:').grid(column=0, row=0, sticky=(tk.E), padx=5, pady=7)
+
+    v_en_exec_align = tk.StringVar()
+    w['en_exec_align'] = ttk.Entry(fr_prefs_exec, textvariable=v_en_exec_align, width=70)
+    w['en_exec_align'].grid(column=1, row=0, sticky=(tk.W, tk.N), padx=10, pady=7)
+    w['en_exec_align'].var = v_en_exec_align
+
+    ttk.Button(fr_prefs_exec, text="Browse", command=self.browse_exec_align) \
+       .grid(column=3, row=0, sticky=(tk.W), padx=10, pady=0)
+
+    # enfuse exec
+    ttk.Label(fr_prefs_exec, text='enfuse:').grid(column=0, row=1, sticky=(tk.E), padx=5, pady=7)
+
+    v_en_exec_enfuse = tk.StringVar()
+    w['en_exec_enfuse'] = ttk.Entry(fr_prefs_exec, textvariable=v_en_exec_enfuse, width=70)
+    w['en_exec_enfuse'].grid(column=1, row=1, sticky=(tk.W, tk.N), padx=10, pady=7)
+    w['en_exec_enfuse'].var = v_en_exec_enfuse
+
+    ttk.Button(fr_prefs_exec, text="Browse", command=self.browse_exec_enfuse) \
+       .grid(column=3, row=1, sticky=(tk.W), padx=10, pady=0)
+
+    # exiftool exec
+    ttk.Label(fr_prefs_exec, text='exiftool:').grid(column=0, row=2, sticky=(tk.E), padx=5, pady=7)
+
+    v_en_exec_exiftool = tk.StringVar()
+    w['en_exec_exiftool'] = ttk.Entry(fr_prefs_exec, textvariable=v_en_exec_exiftool, width=70)
+    w['en_exec_exiftool'].grid(column=1, row=2, sticky=(tk.W, tk.N), padx=10, pady=7)
+    w['en_exec_exiftool'].var = v_en_exec_exiftool
+
+    ttk.Button(fr_prefs_exec, text="Browse", command=self.browse_exec_exiftool) \
+       .grid(column=3, row=2, sticky=(tk.W), padx=(10, 20), pady=(0, 18))
+
+
+    # align_image_stack options
+    fr_prefs_align = ttk.Labelframe(tab_prefs, text='Alignment options')
+    fr_prefs_align.grid(column=0, row=2, sticky=(tk.N, tk.EW), pady=(0,20))
+
+    # aligned prefix
+    ttk.Label(fr_prefs_align, text='   aligned prefix:').grid(column=0, row=0, sticky=(tk.E, tk.N), padx=5, pady=7)
+
+    v_en_prefs_align_prefix = tk.StringVar()
+    w['en_prefs_align_prefix'] = ttk.Entry(fr_prefs_align, textvariable=v_en_prefs_align_prefix,
+                                           width=20, justify=tk.CENTER)
+    w['en_prefs_align_prefix'].grid(column=1, row=0, sticky=(tk.W, tk.N), padx=10, pady=7)
+    w['en_prefs_align_prefix'].var = v_en_prefs_align_prefix
+
+    # use GPU
+    v_ck_prefs_align_gpu = tk.BooleanVar()
+    w['ck_prefs_align_gpu'] = ttk.Checkbutton(fr_prefs_align, variable=v_ck_prefs_align_gpu, text='use GPU')
+    w['ck_prefs_align_gpu'].grid(column=2, row=0, sticky=(tk.E, tk.N), padx=50, pady=(7,18))
+    w['ck_prefs_align_gpu'].var = v_ck_prefs_align_gpu
+
+
+    # GUI options
+    fr_prefs_gui = ttk.Labelframe(tab_prefs, text='GUI options')
+    fr_prefs_gui.grid(column=0, row=4, sticky=(tk.N, tk.EW))
+
+    # mask include color
+    ttk.Label(fr_prefs_gui, text='  mask-include color:').grid(column=0, row=0, sticky=(tk.E), padx=5, pady=7)
+
+    v_en_prefs_gui_mask_include = tk.StringVar()
+    w['en_prefs_gui_mask_include'] = ttk.Entry(fr_prefs_gui, textvariable=v_en_prefs_gui_mask_include,
+                                               width=20, justify=tk.CENTER)
+    w['en_prefs_gui_mask_include'].grid(column=1, row=0, sticky=(tk.W, tk.N), padx=10, pady=7)
+    w['en_prefs_gui_mask_include'].var = v_en_prefs_gui_mask_include
+
+    # mask exclude color
+    ttk.Label(fr_prefs_gui, text='  mask-exclude color:').grid(column=0, row=1, sticky=(tk.E), padx=5, pady=7)
+
+    v_en_prefs_gui_mask_exclude = tk.StringVar()
+    w['en_prefs_gui_mask_exclude'] = ttk.Entry(fr_prefs_gui, textvariable=v_en_prefs_gui_mask_exclude,
+                                               width=20, justify=tk.CENTER)
+    w['en_prefs_gui_mask_exclude'].grid(column=1, row=1, sticky=(tk.W, tk.N), padx=10, pady=7)
+    w['en_prefs_gui_mask_exclude'].var = v_en_prefs_gui_mask_exclude
+
+    # mask active color
+    ttk.Label(fr_prefs_gui, text='  mask-active color:').grid(column=0, row=2, sticky=(tk.E), padx=5, pady=7)
+
+    v_en_prefs_gui_mask_active = tk.StringVar()
+    w['en_prefs_gui_mask_active'] = ttk.Entry(fr_prefs_gui, textvariable=v_en_prefs_gui_mask_active,
+                                               width=20, justify=tk.CENTER)
+    w['en_prefs_gui_mask_active'].grid(column=1, row=2, sticky=(tk.W, tk.N), padx=10, pady=(7,17))
+    w['en_prefs_gui_mask_active'].var = v_en_prefs_gui_mask_active
+
+
+
     # apply configs to all widgets
     self.apply_config()
 
@@ -620,11 +718,20 @@ class App(TkinterDnD.Tk):
 
 
     # check for availability of the required commands/executes
-    for cmd in ['align_image_stack', 'enfuse', 'exiftool']:
+    for cmd, widget in {
+        'align_image_stack' : 'en_exec_align',
+        'enfuse'            : 'en_exec_enfuse',
+        'exiftool'          : 'en_exec_exiftool'}.items():
       if which(cmd) is None:
-        tk.messagebox.showerror(message='Cannot find "' + cmd + '".\nPlease specify the file location manually.')
-
-        # @TODO: show the preferences panel
+        custom_exec = w[widget].var.get()
+        if custom_exec.strip() == '':
+          tk.messagebox.showerror(message='Cannot find "' + cmd + '".\nPlease specify the file location manually.')
+          nb.select(3)  # show the preferences tab
+          break
+        elif not os.path.exists(custom_exec):
+          tk.messagebox.showerror(message='Cannot find "' + custom_exec + '".\nPlease specify the correct location for ' + cmd)
+          nb.select(3)  # show the preferences tab
+          break
 
 
 
@@ -742,6 +849,27 @@ class App(TkinterDnD.Tk):
       w['fr_tif_options'].grid_remove()
 
     w['cb_file_format'].selection_clear()
+
+
+  def browse_exec_align(self):
+    filepath = tk.filedialog.askopenfilename(title='Select align_image_stack execute file')
+
+    if filepath != '':
+      self.widgets['en_exec_align'].var.set(filepath)
+
+
+  def browse_exec_enfuse(self):
+    filepath = tk.filedialog.askopenfilename(title='Select enfuse execute file')
+
+    if filepath != '':
+      self.widgets['en_exec_enfuse'].var.set(filepath)
+
+
+  def browse_exec_exiftool(self):
+    filepath = tk.filedialog.askopenfilename(title='Select exiftool execute file')
+
+    if filepath != '':
+      self.widgets['en_exec_exiftool'].var.set(filepath)
 
 
   def toggle_log(self, show = None):
@@ -902,7 +1030,8 @@ class App(TkinterDnD.Tk):
 
     # add a place holder for cv.new_mask
     cv = self.widgets['cv_image_masks']
-    cv.new_mask = cv.create_line(0, 0, 0, 0, fill='#ffffff')
+    mask_color = self.config.get('widgets', 'en_prefs_gui_mask_active')
+    cv.new_mask = cv.create_line(0, 0, 0, 0, fill=mask_color)
 
     self.widgets['bt_mask_add'].configure(state=tk.DISABLED)
 
@@ -1053,7 +1182,8 @@ class App(TkinterDnD.Tk):
         cv.coords(cv.new_mask, self.new_mask + [event.x, event.y])
     elif node_count == 4:
       cv.delete(cv.new_mask)
-      cv.new_mask = cv.create_polygon(self.new_mask + [event.x, event.y], fill='', outline='#ffffff')
+      mask_color = self.config.get('widgets', 'en_prefs_gui_mask_active')
+      cv.new_mask = cv.create_polygon(self.new_mask + [event.x, event.y], fill='', outline=mask_color)
     else:
       cv.coords(cv.new_mask, self.new_mask + [event.x, event.y])
 
@@ -1195,9 +1325,9 @@ class App(TkinterDnD.Tk):
     image_id = self.get_current_mask_image()
 
     for i, mask in enumerate(masks):
-      mask_color = self.config.get('prefs', 'mask_include_color')
+      mask_color = self.config.get('widgets', 'en_prefs_gui_mask_include')
       if mask['type'] == 'exclude':
-        mask_color = self.config.get('prefs', 'mask_exclude_color')
+        mask_color = self.config.get('widgets', 'en_prefs_gui_mask_exclude')
 
       if editable_mask != None and editable_mask == (image_id + '|' + str(i)):
         cv.editable_mask = {
@@ -1232,7 +1362,8 @@ class App(TkinterDnD.Tk):
     points = self.scale_polygon(mask['mask'], cv.origin, cv.image_scale)
 
     # create the mask
-    p = cv.create_polygon(points, fill='', outline='#ffffff', tags=('editable'))
+    mask_color = self.config.get('widgets', 'en_prefs_gui_mask_active')
+    p = cv.create_polygon(points, fill='', outline=mask_color, tags=('editable'))
     cv.masks[p] = 'editable'
     cv.editable_mask['polygon'] = p
 
@@ -1246,7 +1377,7 @@ class App(TkinterDnD.Tk):
     for i in range(math.floor(len(points)/2)):
       handle = cv.create_oval(points[2*i]-handle_size, points[2*i+1]-handle_size,
                               points[2*i]+handle_size, points[2*i+1]+handle_size,
-                              fill='#ffffff', outline='#ffffff', tags=('handle'))
+                              fill=mask_color, outline=mask_color, tags=('handle'))
       cv.editable_mask['handles'].append(handle)
       cv.tag_bind(handle, '<ButtonPress-1>',   lambda event, tag=handle: self.mask_canvas_on_press_tag(event, tag))
       cv.tag_bind(handle, '<ButtonRelease-1>', self.mask_canvas_on_release_tag)
@@ -1409,16 +1540,15 @@ class App(TkinterDnD.Tk):
       c.read('config.ini')
 
     c['DEFAULT'] = {
-      'rb_mask_type_include'    : 'exclude',
       'ck_align'                : 'True',
       'ck_autocrop'             : 'True',
       'ck_centershift'          : 'True',
       'ck_fov'                  : 'True',
       'sp_corr_threshold'       : '0.95',
-      'sp_error_threshold'      : '3',
-      'sp_control_points'       : '10',
+      'sp_error_threshold'      : '1',
+      'sp_control_points'       : '20',
       'sp_grid_size'            : '5',
-      'sp_scale_factor'         : '1',
+      'sp_scale_factor'         : '0',
       'ck_hard_mask'            : 'True',
       'sp_levels'               : '29',
       'ck_levels'               : 'True',
@@ -1446,9 +1576,17 @@ class App(TkinterDnD.Tk):
       'ck_keep_aligned'         : False,
       'ck_keep_masked'          : False,
 
-      'align_prefix'            : 'aligned__',
-      'mask_include_color'      : '#55ff55',
-      'mask_exclude_color'      : '#5555ff'
+      # preferences
+      'sp_mask_add_type'        : 'exclude',
+      'en_exec_align'           : 'align_image_stack',
+      'en_exec_enfuse'          : 'enfuse',
+      'en_exec_exiftool'        : 'exiftool',
+      'ck_prefs_align_gpu'      : False,
+
+      'en_prefs_align_prefix'     : 'aligned__',
+      'en_prefs_gui_mask_include' : '#55ff55',
+      'en_prefs_gui_mask_exclude' : '#ff5555',
+      'en_prefs_gui_mask_active'  : '#ffffff'
     }
 
     if not c.has_section('prefs'):
@@ -1511,10 +1649,17 @@ class App(TkinterDnD.Tk):
 
 
   def build_align_command(self):
-    cmd = ['align_image_stack', '-v', '-aaligned__', '--use-given-order', '--distortion', '--gpu']
+    w = self.widgets
+
+    align_exec = self.config.get('widgets', 'en_exec_align')
+    align_prefix = self.config.get('widgets', 'en_prefs_align_prefix')
+
+    cmd = [align_exec, '-v', '-a'+align_prefix, '--use-given-order', '--distortion']
+
+    if w['ck_prefs_align_gpu'].var.get():
+      cmd.append('--gpu')
 
     # get the alignment options
-    w = self.widgets
 
     if w['ck_autocrop'].var.get():
       cmd.append('-C')
@@ -1537,7 +1682,9 @@ class App(TkinterDnD.Tk):
 
 
   def build_enfuse_command(self, images):
-    cmd = ['enfuse', '-v', '-o', self.output_name,
+    enfuse_exec = self.config.get('widgets', 'en_exec_enfuse')
+
+    cmd = [enfuse_exec, '-v', '-o', self.output_name,
            '--exposure-weight=0',
            '--saturation-weight=0',
            '--contrast-weight=1']
@@ -1675,7 +1822,7 @@ class App(TkinterDnD.Tk):
       for i, image in enumerate(self.input_images):
         self.aligned_images.append(os.path.join(
           os.path.dirname(image),
-          self.config.get('prefs', 'align_prefix') + '{:04d}'.format(i) + '.tif'))
+          self.config.get('widgets', 'en_prefs_align_prefix') + '{:04d}'.format(i) + '.tif'))
 
       align_cmd = self.build_align_command()
       print(align_cmd)
@@ -1738,7 +1885,8 @@ class App(TkinterDnD.Tk):
     w['tx_log'].insert(tk.END, '\nCopying EXIF from ' + self.input_images[0] + ' to ' + self.output_name + '\n\n')
     w['tx_log'].see(tk.END)
 
-    exiftool_cmd = ['exiftool', '-TagsFromFile', self.input_images[0],
+    exiftool_exec = self.config.get('widgets', 'en_exec_exiftool')
+    exiftool_cmd = [exiftool_exec, '-TagsFromFile', self.input_images[0],
                     '-all:all', '-overwrite_original', self.output_name]
     self.execute_cmd(exiftool_cmd)
 
