@@ -9,8 +9,12 @@ import tkinter.font
 from tkinter import ttk
 from PIL import Image, ImageTk, ImageDraw
 from tkinterdnd2 import DND_FILES, TkinterDnD
+from cv2 import cv2, countNonZero, cvtColor
+import numpy as np
+import multiprocessing as mp
 
-import os
+
+import os, time
 from shutil import which
 import configparser
 import subprocess
@@ -50,7 +54,9 @@ class App(TkinterDnD.Tk):
       'head'   : 0,
     }
 
-
+    self.thread = None
+    self.subprocess = None
+    self.opencv_aligner = None
 
     self.load_config()
 
@@ -280,8 +286,7 @@ class App(TkinterDnD.Tk):
     tab_stack.columnconfigure(1, weight=2)
 
 
-    # align_image_stack options
-    fr_stack_align = ttk.Labelframe(tab_stack, text='Alignment')
+    fr_stack_align = ttk.Labelframe(tab_stack, text='Alignment options')
     fr_stack_align.grid(column=0, row=0, sticky=(tk.N, tk.EW))
 
     v_ck_align = tk.BooleanVar()
@@ -290,71 +295,122 @@ class App(TkinterDnD.Tk):
     w['ck_align'].grid(column=0, row=0, sticky=(tk.W, tk.N), padx=20, pady=5)
     w['ck_align'].var = v_ck_align
 
+
+    ttk.Label(fr_stack_align, text='    Aligner: ').grid(column=1, row=0, sticky=(tk.E, tk.N), padx=(20,0), pady=7)
+
+    v_cb_stack_aligner = tk.StringVar()
+    w['cb_stack_aligner'] = ttk.Combobox(fr_stack_align, justify=tk.CENTER,
+                                         values=('ECC', 'align_image_stack'),
+                                         textvariable=v_cb_stack_aligner, state='readonly', width=20)
+    w['cb_stack_aligner'].grid(column=2, row=0, sticky=(tk.W, tk.N), padx=(0,10), pady=(7, 20))
+    w['cb_stack_aligner'].bind('<<ComboboxSelected>>', lambda x: self.ui_cb_stack_aligner_changed())
+    w['cb_stack_aligner'].var = v_cb_stack_aligner
+
+
+    # align_image_stack options
+    fr_stack_ais = ttk.Labelframe(tab_stack, text='align_image_stack options')
+    fr_stack_ais.grid(column=0, row=1, sticky=(tk.N, tk.EW))
+    w['fr_stack_ais'] = fr_stack_ais
+
+
     v_ck_autocrop = tk.BooleanVar()
-    w['ck_autocrop'] = ttk.Checkbutton(fr_stack_align, text='Autocrop', onvalue=True, offvalue=False,
+    w['ck_autocrop'] = ttk.Checkbutton(fr_stack_ais, text='Autocrop', onvalue=True, offvalue=False,
                                        variable=v_ck_autocrop)
     w['ck_autocrop'].grid(column=1, row=0, sticky=(tk.W), padx=20, pady=5)
     w['ck_autocrop'].var = v_ck_autocrop
 
     v_ck_centershift = tk.BooleanVar()
-    w['ck_centershift'] = ttk.Checkbutton(fr_stack_align, text='Optimize image center shift',
+    w['ck_centershift'] = ttk.Checkbutton(fr_stack_ais, text='Optimize image center shift',
                                           onvalue=True, offvalue=False, variable=v_ck_centershift)
     w['ck_centershift'].grid(column=0, row=1, sticky=(tk.W), padx=20, pady=5)
     w['ck_centershift'].var = v_ck_centershift
 
     v_ck_fov = tk.BooleanVar()
-    w['ck_fov'] = ttk.Checkbutton(fr_stack_align, text='Optimize field of view', onvalue=True, offvalue=False,
+    w['ck_fov'] = ttk.Checkbutton(fr_stack_ais, text='Optimize field of view', onvalue=True, offvalue=False,
                                   variable=v_ck_fov)
     w['ck_fov'].grid(column=1, row=1, sticky=(tk.W), padx=20, pady=5)
     w['ck_fov'].var = v_ck_fov
 
     # correlation threshold
-    ttk.Label(fr_stack_align, text='Correlation threshold: ').grid(column=0, row=2, sticky=(tk.E), padx=20, pady=10)
+    ttk.Label(fr_stack_ais, text='Correlation threshold: ').grid(column=0, row=2, sticky=(tk.E), padx=20, pady=10)
 
     v_sp_corr_threshold = tk.StringVar()
-    w['sp_corr_threshold'] = ttk.Spinbox(fr_stack_align, from_=0.0, to=1.0, increment=0.1,
+    w['sp_corr_threshold'] = ttk.Spinbox(fr_stack_ais, from_=0.0, to=1.0, increment=0.1,
                                          justify=tk.CENTER, width=10, textvariable=v_sp_corr_threshold)
     w['sp_corr_threshold'].grid(column=1, row=2, sticky=(tk.W), padx=20, pady=10)
     w['sp_corr_threshold'].var = v_sp_corr_threshold
 
     # error threshold
-    ttk.Label(fr_stack_align, text='Error threshold: ').grid(column=0, row=3, sticky=(tk.E), padx=20, pady=10)
+    ttk.Label(fr_stack_ais, text='Error threshold: ').grid(column=0, row=3, sticky=(tk.E), padx=20, pady=10)
 
     v_sp_error_threshold = tk.StringVar()
-    w['sp_error_threshold'] = ttk.Spinbox(fr_stack_align, from_=1, to=20, increment=1,
+    w['sp_error_threshold'] = ttk.Spinbox(fr_stack_ais, from_=1, to=20, increment=1,
                                          justify=tk.CENTER, width=10, textvariable=v_sp_error_threshold)
     w['sp_error_threshold'].grid(column=1, row=3, sticky=(tk.W), padx=20, pady=10)
     w['sp_error_threshold'].var = v_sp_error_threshold
 
 
     # control points
-    ttk.Label(fr_stack_align, text='Number of control points: ').grid(column=0, row=4, sticky=(tk.E), padx=20, pady=7)
+    ttk.Label(fr_stack_ais, text='Number of control points: ').grid(column=0, row=4, sticky=(tk.E), padx=20, pady=7)
 
     v_sp_control_points = tk.IntVar()
-    w['sp_control_points'] = ttk.Spinbox(fr_stack_align, from_=0, to=50, increment=1,
+    w['sp_control_points'] = ttk.Spinbox(fr_stack_ais, from_=0, to=50, increment=1,
                                          justify=tk.CENTER, width=10, textvariable=v_sp_control_points)
     w['sp_control_points'].grid(column=1, row=4, sticky=(tk.W), padx=20, pady=7)
     w['sp_control_points'].var = v_sp_control_points
 
     # grid size
-    ttk.Label(fr_stack_align, text='Grid size: ').grid(column=0, row=5, sticky=(tk.E), padx=20, pady=7)
+    ttk.Label(fr_stack_ais, text='Grid size: ').grid(column=0, row=5, sticky=(tk.E), padx=20, pady=7)
 
     v_sp_grid_size = tk.IntVar()
-    w['sp_grid_size'] = ttk.Spinbox(fr_stack_align, from_=1, to=10, increment=1,
+    w['sp_grid_size'] = ttk.Spinbox(fr_stack_ais, from_=1, to=10, increment=1,
                                     justify=tk.CENTER, width=10, textvariable=v_sp_grid_size)
     w['sp_grid_size'].grid(column=1, row=5, sticky=(tk.W), padx=20, pady=7)
     w['sp_grid_size'].var = v_sp_grid_size
 
     # scale factor
-    ttk.Label(fr_stack_align, text='Scale factor: ').grid(column=0, row=6, sticky=(tk.E), padx=20, pady=7)
+    ttk.Label(fr_stack_ais, text='Scale factor: ').grid(column=0, row=6, sticky=(tk.E), padx=20, pady=7)
 
     v_sp_scale_factor = tk.IntVar()
-    w['sp_scale_factor'] = ttk.Spinbox(fr_stack_align, from_=0, to=5, increment=1,
+    w['sp_scale_factor'] = ttk.Spinbox(fr_stack_ais, from_=0, to=5, increment=1,
                                        justify=tk.CENTER, width=10, textvariable=v_sp_scale_factor)
-    w['sp_scale_factor'].grid(column=1, row=6, sticky=(tk.W), padx=20, pady=7)
+    w['sp_scale_factor'].grid(column=1, row=6, sticky=(tk.W), padx=20, pady=(7, 20))
     w['sp_scale_factor'].var = v_sp_scale_factor
 
-    ttk.Frame(fr_stack_align).grid(column=0, row=7, pady=5)  # padding bottom
+
+
+
+    # ECC option
+    fr_stack_ecc = ttk.Labelframe(tab_stack, text='ECC options')
+    fr_stack_ecc.grid(column=0, row=1, sticky=(tk.N, tk.EW))
+    w['fr_stack_ecc'] = fr_stack_ecc
+
+    # number of iteration
+    ttk.Label(fr_stack_ecc, text='Number of iterations: ').grid(column=0, row=0, sticky=(tk.E), padx=20, pady=10)
+
+    v_sp_ecc_iterations = tk.IntVar()
+    w['sp_ecc_iterations'] = ttk.Spinbox(fr_stack_ecc, from_=0, to=100, increment=1,
+                                         justify=tk.CENTER, width=10, textvariable=v_sp_ecc_iterations)
+    w['sp_ecc_iterations'].grid(column=1, row=0, sticky=(tk.W), padx=20, pady=10)
+    w['sp_ecc_iterations'].var = v_sp_ecc_iterations
+
+    # termination ESP
+    ttk.Label(fr_stack_ecc, text='Termination EPS: ').grid(column=0, row=1, sticky=(tk.E), padx=20, pady=10)
+
+    v_sp_ecc_ter_eps = tk.StringVar()
+    w['sp_ecc_ter_eps'] = ttk.Entry(fr_stack_ecc, justify=tk.CENTER, width=10, textvariable=v_sp_ecc_ter_eps)
+    w['sp_ecc_ter_eps'].grid(column=1, row=1, sticky=(tk.W), padx=20, pady=10)
+    w['sp_ecc_ter_eps'].var = v_sp_ecc_ter_eps
+
+    # number of processes in the Pool
+    ttk.Label(fr_stack_ecc, text='Multiprocessing pool: ').grid(column=0, row=3, sticky=(tk.E), padx=20, pady=10)
+
+    v_sp_ecc_pool = tk.IntVar()
+    w['sp_ecc_pool'] = ttk.Spinbox(fr_stack_ecc, from_=1, to=mp.cpu_count()-1, increment=1,
+                                   justify=tk.CENTER, width=10, textvariable=v_sp_ecc_pool)
+    w['sp_ecc_pool'].grid(column=1, row=3, sticky=(tk.W), padx=20, pady=(10, 20))
+    w['sp_ecc_pool'].var = v_sp_ecc_pool
+
 
 
     # Fusion options
@@ -479,11 +535,11 @@ class App(TkinterDnD.Tk):
     v_ck_output_size = tk.BooleanVar()
     w['ck_output_size'] = ttk.Checkbutton(fr_stack_output, text='Final size', onvalue=True, offvalue=False,
                                            variable=v_ck_output_size, command=self.ui_ck_output_size_changed)
-    w['ck_output_size'].grid(column=0, row=1, sticky=(tk.W, tk.N), padx=10, pady=7)
+    #w['ck_output_size'].grid(column=0, row=1, sticky=(tk.W, tk.N), padx=10, pady=7)
     w['ck_output_size'].var = v_ck_output_size
 
     fr_output_size = ttk.Frame(fr_stack_output)
-    fr_output_size.grid(column=1, row=1, sticky=(tk.EW))
+    #fr_output_size.grid(column=1, row=1, sticky=(tk.EW))
 
     ttk.Label(fr_output_size, text='width: ').grid(column=0, row=0, sticky=(tk.E), padx=5, pady=7)
 
@@ -515,7 +571,7 @@ class App(TkinterDnD.Tk):
 
     # file format
     fr_file_format = ttk.Frame(fr_stack_output)
-    fr_file_format.grid(column=0, columnspan=3, row=2, sticky=(tk.W), padx=10, pady=7)
+    fr_file_format.grid(column=0, columnspan=3, row=0, sticky=(tk.W), padx=10, pady=7)
 
     ttk.Label(fr_file_format, text='Format: ').grid(column=0, row=0, sticky=(tk.W), padx=10, pady=7)
 
@@ -553,7 +609,7 @@ class App(TkinterDnD.Tk):
     w['cb_tif_compression'].bind('<<ComboboxSelected>>', lambda x : w['cb_tif_compression'].selection_clear())
 
     fr_intermediate_files = ttk.Frame(fr_stack_output)
-    fr_intermediate_files.grid(column=0, columnspan=3, row=3, sticky=(tk.EW), padx=10, pady=7)
+    fr_intermediate_files.grid(column=0, columnspan=3, row=1, sticky=(tk.EW), padx=10, pady=7)
 
     v_ck_keep_aligned = tk.BooleanVar()
     w['ck_keep_aligned'] = ttk.Checkbutton(fr_intermediate_files, text='Keep aligned images',
@@ -716,6 +772,8 @@ class App(TkinterDnD.Tk):
 
     w['bt_cancel_stack'].configure(state=tk.DISABLED)
 
+    self.ui_cb_stack_aligner_changed()
+
 
     # check for availability of the required commands/executes
     for cmd, widget in {
@@ -794,6 +852,17 @@ class App(TkinterDnD.Tk):
     w['sp_control_points'].config(state=st)
     w['sp_grid_size'].config(state=st)
     w['sp_scale_factor'].config(state=st)
+
+
+  def ui_cb_stack_aligner_changed(self):
+    w = self.widgets
+
+    if w['cb_stack_aligner'].var.get() == 'ECC':
+      w['fr_stack_ais'].grid_remove()
+      w['fr_stack_ecc'].grid()
+    else:
+      w['fr_stack_ais'].grid()
+      w['fr_stack_ecc'].grid_remove()
 
 
   def ui_ck_levels_changed(self):
@@ -946,7 +1015,9 @@ class App(TkinterDnD.Tk):
       w['tr_images'].delete(image_id)
       w['tr_mask_images'].delete(image_id)
 
-    self.input_images = list(set(self.input_images).difference(set(selection)))
+    for image_id in self.input_images[:]:
+      if image_id in selection:
+        self.input_images.remove(image_id)
 
     w['bt_image_remove'].configure(state=tk.DISABLED)
 
@@ -1541,6 +1612,10 @@ class App(TkinterDnD.Tk):
 
     c['DEFAULT'] = {
       'ck_align'                : 'True',
+      'cb_stack_aligner'        : 'ECC',
+      'sp_ecc_iterations'       : '10',
+      'sp_ecc_ter_eps'          : '1e-7',
+      'sp_ecc_pool'             : math.floor(mp.cpu_count()/2),
       'ck_autocrop'             : 'True',
       'ck_centershift'          : 'True',
       'ck_fov'                  : 'True',
@@ -1584,9 +1659,9 @@ class App(TkinterDnD.Tk):
       'ck_prefs_align_gpu'      : False,
 
       'en_prefs_align_prefix'     : 'aligned__',
-      'en_prefs_gui_mask_include' : '#55ff55',
-      'en_prefs_gui_mask_exclude' : '#ff5555',
-      'en_prefs_gui_mask_active'  : '#ffffff'
+      'en_prefs_gui_mask_include' : '#00ff00',
+      'en_prefs_gui_mask_exclude' : '#ff0000',
+      'en_prefs_gui_mask_active'  : '#ffff00'
     }
 
     if not c.has_section('prefs'):
@@ -1748,42 +1823,40 @@ class App(TkinterDnD.Tk):
     for filepath in self.input_images:
       # important: treat every image as having mask. Our outputs might have
       # different format/setting than the original, don't mix them
-      img  = Image.open(images_map[filepath])
-      rgba = Image.new('RGBA', img.size)
+      img  = Image.open(images_map[filepath]).convert('RGBA')
 
-      mask_layer = Image.new('RGBA', img.size)
-      pdraw = ImageDraw.Draw(mask_layer)
-
-      # include the whole image by default
-      pdraw.rectangle([(0,0),img.size], fill=(255,255,255,255), outline=(255,255,255,255))
+      alpha = Image.new('L', img.size, 255)
+      alpha_mask = ImageDraw.Draw(alpha)
 
       if filepath in file_masks:
         for mask in file_masks[filepath]:
           if mask['type'] == 'exclude':
-            pdraw.polygon(mask['mask'], fill=(255,255,255,0), outline=(255,255,255,0))
+            alpha_mask.polygon(mask['mask'], fill=0)
 
         # add include mask after exclude masks
         for mask in file_masks[filepath]:
           if mask['type'] == 'include':
-            pdraw.polygon(mask['mask'], fill=(255,255,255,255), outline=(255,255,255,255))
+            alpha_mask.polygon(mask['mask'], fill=255)
 
-      rgba.paste(img, (0,0), mask=mask_layer)
+      img.putalpha(alpha)
 
       new_path = os.path.join(
         os.path.dirname(images_map[filepath]),
         'masked_' + os.path.splitext(os.path.basename(images_map[filepath]))[0] + '.tif'
       )
 
-      rgba.save(new_path)
+      img.save(new_path)
       masked_images.append(new_path)
 
     return masked_images
 
 
-
   def stack_images(self):
     """ perform optional alignment and fusing the images """
     w = self.widgets
+
+    global logger    # ugly work-around as apply_async() can pickle anything involve tK
+    logger = w['tx_log']
 
     # check if we have at least 2 images
     if len(self.input_images) < 2:
@@ -1817,23 +1890,50 @@ class App(TkinterDnD.Tk):
     self.returncode = tk.IntVar()
 
     if w['ck_align'].var.get():
-      self.aligned_images = []
+      aligned_prefix = self.config.get('widgets', 'en_prefs_align_prefix')
 
-      for i, image in enumerate(self.input_images):
-        self.aligned_images.append(os.path.join(
-          os.path.dirname(image),
-          self.config.get('widgets', 'en_prefs_align_prefix') + '{:04d}'.format(i) + '.tif'))
+      if w['cb_stack_aligner'].var.get() == 'align_image_stack':
+        self.aligned_images = []
 
-      align_cmd = self.build_align_command()
-      print(align_cmd)
+        for i, image in enumerate(self.input_images):
+          self.aligned_images.append(os.path.join(
+            os.path.dirname(image),
+            aligned_prefix + '{:04d}'.format(i) + '.tif'))
 
-      self.returncode.set(-1)
-      threading.Thread(target=self.execute_cmd, args=[align_cmd], daemon=True).start()
-      self.wait_variable(self.returncode)
+        align_cmd = self.build_align_command()
+        print(align_cmd)
 
-      if self.returncode.get() > 0:
-        tk.messagebox.showerror(message='Error aligning images, please check output log.')
-        return
+        self.returncode.set(-1)
+        self.thread = threading.Thread(target=self.execute_cmd, args=[align_cmd], daemon=True).start()
+        self.wait_variable(self.returncode)
+
+        if self.returncode.get() > 0:
+          tk.messagebox.showerror(message='Error aligning images, please check output log.')
+          w['bt_cancel_stack'].configure(state=tk.DISABLED)
+          w['bt_stack'].configure(state=tk.NORMAL)
+          return
+
+      else:  # ECC alignment
+        self.opencv_aligner = OpenCV_Aligner()
+        ecc_options = {
+          'prefix'      : aligned_prefix,
+          'iteration'   : int(w['sp_ecc_iterations'].var.get()),
+          'ter_eps'     : float(w['sp_ecc_ter_eps'].var.get()),
+          'pool_size'   : int(w['sp_ecc_pool'].var.get()),
+          'signaler'    : self.returncode,
+          'align_images': [],
+          'logger'      : w['tx_log']
+        }
+
+        w['tx_log'].insert(tk.END, '\n======== Aligning images using ECC ======== ')
+        w['tx_log'].see(tk.END)
+
+
+        self.returncode.set(-1)
+        self.thread = threading.Thread(target=self.opencv_aligner.align, args=[self.input_images, ecc_options], daemon=True).start()
+        self.wait_variable(self.returncode)
+        self.aligned_images = ecc_options['aligned_images']
+
 
     if self.stack_cancelled == True:
       return
@@ -1855,8 +1955,8 @@ class App(TkinterDnD.Tk):
     if not has_mask:
       w['tx_log'].insert(tk.END, '\n\n===== NO MASK FOUND =====\n\n')
     else:
+      w['tx_log'].insert(tk.END, '\n\n===== APPLYING MASK =====\n\n')
       images = self.apply_masks_to_images(images)
-      w['tx_log'].insert(tk.END, '\n\n===== MASKS APPLIED =====\n\n')
 
 
     # call enfuse
@@ -1867,7 +1967,7 @@ class App(TkinterDnD.Tk):
     w['tx_log'].insert(tk.END, 'output to ' + self.output_name + '\n\n')
 
     self.returncode.set(-1)
-    threading.Thread(target=self.execute_cmd, args=[enfuse_cmd], daemon=True).start()
+    self.thread = threading.Thread(target=self.execute_cmd, args=[enfuse_cmd], daemon=True).start()
     self.wait_variable(self.returncode)
 
     if self.stack_cancelled == True:
@@ -1875,6 +1975,8 @@ class App(TkinterDnD.Tk):
 
     if self.returncode.get() > 0:
       tk.messagebox.showerror(message='Error stacking images, please check output log.')
+      w['bt_cancel_stack'].configure(state=tk.DISABLED)
+      w['bt_stack'].configure(state=tk.NORMAL)
       return
 
     w['tx_log'].insert(tk.END, '\nDone stacking to ' + self.output_name + '\n\n')
@@ -1898,7 +2000,7 @@ class App(TkinterDnD.Tk):
       w['tx_log'].see(tk.END)
 
     # clean up masked TIFFs
-    if has_mask and not w['ck_keep_masked']:
+    if has_mask and not w['ck_keep_masked'].var.get():
       for filename in images:
         os.remove(filename)
       w['tx_log'].insert(tk.END, '\nRemoved masked images \n\n')
@@ -1930,6 +2032,12 @@ class App(TkinterDnD.Tk):
     if self.subprocess:
       self.subprocess.kill()
 
+    if self.thread:
+      self.thread.join()
+
+    if self.opencv_aligner:
+      self.opencv_aligner.cancel()
+
     w['tx_log'].insert(tk.END, '\n\nStacking cancelled by user.\n\n')
     w['tx_log'].see(tk.END)
 
@@ -1952,6 +2060,147 @@ class App(TkinterDnD.Tk):
 
 
 
+
+class OpenCV_Aligner():
+  prefix = 'aligned__'
+  iteration = 10
+  ter_eps = 1e-7
+  pool_size = math.floor(mp.cpu_count()/2)
+  cancelled = False  # flag to terminate processes
+
+  def align(self, image_list, options = {}):
+    global pool
+    global logger
+
+    """ root-level function for multiprocessing """
+
+    if 'prefix' in options:
+      self.prefix = options['prefix']
+
+    if 'iteration' in options:
+      self.iteration = options['iteration']
+
+    if 'ter_eps' in options:
+      self.ter_eps = options['ter_eps']
+
+    if 'pool_size' in options:
+      self.pool_size = options['pool_size']
+
+
+    anchor_index = math.floor(len(image_list)/2)
+    anchor_img = cv2.imread(image_list[anchor_index])
+
+    # write out anchor image as-is
+    aligned_filename = os.path.join(
+      os.path.dirname(image_list[anchor_index]),
+      self.prefix + os.path.basename(image_list[anchor_index])
+    )
+
+    cv2.imwrite(aligned_filename, anchor_img)
+    options['logger'].insert(tk.END, '\nUsing "' + os.path.basename(image_list[anchor_index]) + '" as anchor')
+    options['logger'].see(tk.END)
+
+    # align other images against anchor
+    anchor_img_gray = cv2.cvtColor(anchor_img, cv2.COLOR_BGR2GRAY)
+
+    # initiate a pool
+    pool = mp.Pool(self.pool_size)
+
+    options['logger'].insert(tk.END, '\nInitated a pool of ' + str(self.pool_size) + ' workers\n')
+    options['logger'].see(tk.END)
+
+    aligned_images = []
+    results = []
+    self.cancelled = False
+
+    for i, filepath in enumerate(image_list):
+      if i != anchor_index:
+        options['logger'].insert(tk.END, '\nAligning "' + os.path.basename(filepath) + '"')
+        options['logger'].see(tk.END)
+
+        # important: do not pass any widget to apply_async, or it won't run
+        result = pool.apply_async(self.align_image_ECC, (anchor_img_gray, filepath))
+        results.append(result)
+
+      aligned_filename = os.path.join(
+        os.path.dirname(filepath),
+        self.prefix + os.path.basename(filepath)
+      )
+      aligned_images.append(aligned_filename)
+
+
+    # close Pool and let all the processes complete
+    pool.close()
+    pool.join()  # wait for all processes
+
+    if not self.cancelled:
+      options['logger'].insert(tk.END, '\n\nDone aligning all images\n')
+      options['logger'].see(tk.END)
+
+
+    options['aligned_images'] = aligned_images
+    options['signaler'].set(0)
+
+
+
+  def align_image_ECC(self, anchor_img_gray, target_filepath):
+    print('ECC aligning: ', target_filepath)
+
+    img = cv2.imread(target_filepath)
+    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    warp_mode = cv2.MOTION_AFFINE
+    warp_matrix = np.eye(2, 3, dtype=np.float32)
+
+    # Specify the number of iterations.
+    number_of_iterations = self.iteration
+
+    # Specify the threshold of the increment in the correlation
+    # coefficient between two iterations
+    termination_eps = self.ter_eps
+
+    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                number_of_iterations, termination_eps)
+
+    # Run the ECC algorithm. The results are stored in warp_matrix.
+    (cc, warp_matrix) = cv2.findTransformECC(anchor_img_gray, img_gray, warp_matrix,
+                                              warp_mode, criteria)
+
+    # Get the target size from the desired image
+    target_shape = anchor_img_gray.shape
+
+    aligned_img = cv2.warpAffine(
+                        img,
+                        warp_matrix,
+                        (target_shape[1], target_shape[0]),
+                        flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
+                        borderMode=cv2.BORDER_CONSTANT,
+                        borderValue=0)
+
+    aligned_filename = os.path.join(
+      os.path.dirname(target_filepath),
+      self.prefix + os.path.basename(target_filepath)
+    )
+
+    cv2.imwrite(aligned_filename, aligned_img)
+    print('ECC aligning done, written to: ', aligned_filename)
+
+
+
+  def cancel(self):
+    global pool
+
+    self.cancelled = True
+    pool.close()
+    pool.terminate()
+    pool.join()
+
+
+
+
 if __name__ == "__main__":
   app = App()
   app.mainloop()
+
+  # global placeholder to work around multiprocessing
+  pool = None
