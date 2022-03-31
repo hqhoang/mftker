@@ -15,6 +15,7 @@ import multiprocessing as mp
 
 
 import os, time
+import platform
 from shutil import which
 import configparser
 import subprocess
@@ -42,6 +43,7 @@ class App(TkinterDnD.Tk):
     self.mask_clipboard = []  # clipboard for copying/pasting masks
 
     self.output_image = None
+    self.save_file    = None
 
     self.preview_cache = {
       'slots' : [None] * 5,
@@ -62,9 +64,13 @@ class App(TkinterDnD.Tk):
     self.load_config()
 
     self.title('MFTker')
-    self.geometry('1600x1000')
-    self.minsize(1200, 1000)
+    self.minsize(800, 600)
     self.resizable(True, True)
+
+    #self.geometry('1500x800')
+    # use all screen size
+    self.geometry("%dx%d+0+0" % (self.winfo_screenwidth(), self.winfo_screenheight()))
+
 
     self.columnconfigure(0, weight=1)
     self.rowconfigure(0, weight=1)
@@ -76,7 +82,8 @@ class App(TkinterDnD.Tk):
     style.theme_use('default')
     style.configure('TNotebook.Tab', padding=[40, 5])
     style.configure('TFrame', background='#f8f8f8')
-    style.configure('TLabelframe', background='#f8f8f8', labelmargins=10, padding=0)
+    style.configure('TLabelframe', background='#f8f8f8', labelmargins=(10, 5, 0, 0),
+                    borderwidth=2, bordercolor='#cccccc', padding=0)
     style.configure('TLabelframe.Label', background='#f8f8f8')
     style.configure('Treeview', rowheight=25)
     style.configure('TCheckbutton', background='#f8f8f8')
@@ -286,12 +293,27 @@ class App(TkinterDnD.Tk):
 
 
     # ==== set up Stack tab ====
-    tab_stack.rowconfigure(5, weight=1)
-    tab_stack.columnconfigure(1, weight=2)
+    tab_stack.rowconfigure(0, weight=1)
+    tab_stack.columnconfigure(2, weight=1)
+
+    # fr_stack_left_pane = ScrollFrame(tab_stack)
+    fr_stack_left_pane = ScrollableFrame(tab_stack, background='#ff5555')
+    fr_stack_left_pane.grid(column=1, row=0, sticky=(tk.NS, tk.EW))
 
 
-    fr_stack_align = ttk.Labelframe(tab_stack, text=' Alignment options ')
-    fr_stack_align.grid(column=0, row=0, sticky=(tk.N, tk.EW))
+    fr_stack_left_pane.view_port.rowconfigure(8, weight=1)
+    fr_stack_left_pane.view_port.columnconfigure(0, weight=1)
+
+    # scrollbar for left pane
+    s = tk.Scrollbar(tab_stack, orient=tk.VERTICAL, command=fr_stack_left_pane.yview)
+    fr_stack_left_pane.configure(yscrollcommand=s.set)
+    fr_stack_left_pane.scrollbar = s
+    s.grid(column=0, row=0, sticky=(tk.NS))
+
+
+    # alignment frame
+    fr_stack_align = ttk.Labelframe(fr_stack_left_pane.view_port, text=' Alignment options ')
+    fr_stack_align.grid(column=0, row=0, sticky=(tk.NS, tk.EW))
 
     v_ck_align = tk.BooleanVar()
     w['ck_align'] = ttk.Checkbutton(fr_stack_align, text='Align images', onvalue=True, offvalue=False,
@@ -300,20 +322,24 @@ class App(TkinterDnD.Tk):
     w['ck_align'].var = v_ck_align
 
 
-    ttk.Label(fr_stack_align, text='    Aligner: ').grid(column=1, row=0, sticky=(tk.E, tk.N), padx=(20,0), pady=7)
+    ttk.Label(fr_stack_align, text='    Aligner: ').grid(column=1, row=0, sticky=(tk.E, tk.N), padx=(20,0), pady=5)
 
     v_cb_stack_aligner = tk.StringVar()
     w['cb_stack_aligner'] = ttk.Combobox(fr_stack_align, justify=tk.CENTER,
                                          values=('ECC', 'align_image_stack'),
                                          textvariable=v_cb_stack_aligner, state='readonly', width=20)
-    w['cb_stack_aligner'].grid(column=2, row=0, sticky=(tk.W, tk.N), padx=(0,10), pady=(7, 20))
+    w['cb_stack_aligner'].grid(column=2, row=0, sticky=(tk.W, tk.N), padx=(0,10), pady=(5, 20))
     w['cb_stack_aligner'].bind('<<ComboboxSelected>>', lambda x: self.ui_cb_stack_aligner_changed())
     w['cb_stack_aligner'].var = v_cb_stack_aligner
 
 
+    # padding between frames
+    ttk.Frame(fr_stack_left_pane.view_port).grid(column=0, row=1, sticky=(tk.N, tk.EW), pady=7)
+
+
     # align_image_stack options
-    fr_stack_ais = ttk.Labelframe(tab_stack, text=' align_image_stack options ')
-    fr_stack_ais.grid(column=0, row=1, sticky=(tk.N, tk.EW))
+    fr_stack_ais = ttk.Labelframe(fr_stack_left_pane.view_port, text=' align_image_stack options ')
+    fr_stack_ais.grid(column=0, row=2, sticky=(tk.N, tk.EW))
     w['fr_stack_ais'] = fr_stack_ais
 
 
@@ -383,10 +409,9 @@ class App(TkinterDnD.Tk):
 
 
 
-
     # ECC option
-    fr_stack_ecc = ttk.Labelframe(tab_stack, text=' ECC options ')
-    fr_stack_ecc.grid(column=0, row=1, sticky=(tk.N, tk.EW))
+    fr_stack_ecc = ttk.Labelframe(fr_stack_left_pane.view_port, text=' ECC options ')
+    fr_stack_ecc.grid(column=0, row=2, sticky=(tk.N, tk.EW))
     w['fr_stack_ecc'] = fr_stack_ecc
 
     # number of iteration
@@ -417,11 +442,13 @@ class App(TkinterDnD.Tk):
 
 
 
-    # Fusion options
-    ttk.Frame(tab_stack).grid(column=0, row=1, sticky=(tk.N, tk.EW), pady=5)  # padding between frames
+    # padding between frames
+    ttk.Frame(fr_stack_left_pane.view_port).grid(column=0, row=3, sticky=(tk.N, tk.EW), pady=7)
 
-    fr_stack_fusion = ttk.Labelframe(tab_stack, text=' Fusion ')
-    fr_stack_fusion.grid(column=0, row=2, sticky=(tk.N, tk.EW))
+
+    # enfuse options
+    fr_stack_fusion = ttk.Labelframe(fr_stack_left_pane.view_port, text=' enfuse options ')
+    fr_stack_fusion.grid(column=0, row=4, sticky=(tk.N, tk.EW))
     fr_stack_fusion.columnconfigure(3, weight=1)
 
     v_ck_hard_mask = tk.BooleanVar()
@@ -449,7 +476,7 @@ class App(TkinterDnD.Tk):
     ttk.Label(fr_stack_fusion, text='Constrast window size: ').grid(column=0, row=2, sticky=(tk.E), padx=10, pady=7)
 
     v_sp_window_size = tk.IntVar()
-    w['sp_window_size'] = ttk.Spinbox(fr_stack_fusion, from_=3, to=50, increment=2,
+    w['sp_window_size'] = ttk.Spinbox(fr_stack_fusion, from_=3, to=100, increment=2,
                                       justify=tk.CENTER, width=10, textvariable=v_sp_window_size)
     w['sp_window_size'].grid(column=1, row=2, sticky=(tk.W), padx=20, pady=7)
     w['sp_window_size'].var = v_sp_window_size
@@ -524,14 +551,14 @@ class App(TkinterDnD.Tk):
     w['cb_gray_proj'].bind('<<ComboboxSelected>>', lambda x : w['cb_gray_proj'].selection_clear())
     w['cb_gray_proj'].var = v_cb_gray_proj
 
-    ttk.Frame(fr_stack_fusion).grid(column=0, row=6, pady=5)  # padding bottom
 
+    # padding between frames
+    ttk.Frame(fr_stack_left_pane.view_port).grid(column=0, row=5, sticky=(tk.N, tk.EW), pady=7)
 
     # Output options
-    ttk.Frame(tab_stack).grid(column=0, row=3, sticky=(tk.N, tk.EW), pady=5)  # padding between frames
 
-    fr_stack_output = ttk.Labelframe(tab_stack, text=' Output ')
-    fr_stack_output.grid(column=0, row=4, sticky=(tk.N, tk.EW))
+    fr_stack_output = ttk.Labelframe(fr_stack_left_pane.view_port, text=' Output ')
+    fr_stack_output.grid(column=0, row=6, sticky=(tk.N, tk.EW))
     fr_stack_output.columnconfigure(3, weight=1)
 
 
@@ -631,8 +658,8 @@ class App(TkinterDnD.Tk):
 
 
     # output actions
-    fr_stack_actions = ttk.Frame(tab_stack)
-    fr_stack_actions.grid(column=0, row=5, sticky=(tk.N, tk.EW), pady=20)
+    fr_stack_actions = ttk.Frame(fr_stack_left_pane.view_port, padding=(15, 10))
+    fr_stack_actions.grid(column=0, row=7, sticky=(tk.N, tk.EW), pady=20)
     fr_stack_actions.columnconfigure(0, weight=1)
     fr_stack_actions.columnconfigure(1, weight=1)
     fr_stack_actions.columnconfigure(2, weight=1)
@@ -648,18 +675,18 @@ class App(TkinterDnD.Tk):
 
     # stacked preview pane
     w['cv_stacked_preview'] = tk.Canvas(tab_stack, background='#eeeeee')
-    w['cv_stacked_preview'].grid(column=1, row=0, rowspan=6, sticky=(tk.NS, tk.EW), padx=(4,0))
+    w['cv_stacked_preview'].grid(column=2, row=0, sticky=(tk.NS, tk.EW), padx=(4,0))
     w['cv_stacked_preview'].bind("<Configure>", lambda x: self.update_output_image_preview())
     w['cv_stacked_preview'].grid_remove()
 
 
     # textbox to print log to
-    w['tx_log'] = tk.Text(tab_stack, width=50, height=40, borderwidth=5, relief=tk.FLAT)
-    w['tx_log'].grid(column=1, row=0, rowspan=6, sticky=(tk.NS, tk.EW), padx=(4, 0))
+    w['tx_log'] = tk.Text(tab_stack, borderwidth=5, relief=tk.FLAT, state=tk.DISABLED)
+    w['tx_log'].grid(column=2, row=0, sticky=(tk.NS, tk.EW), padx=(4, 0))
 
     # scrollbar for log text
     s = ttk.Scrollbar(tab_stack, orient=tk.VERTICAL, command=w['tx_log'].yview)
-    s.grid(column=2, row=0, rowspan=6, sticky=(tk.NS))
+    s.grid(column=3, row=0, sticky=(tk.NS))
     w['tx_log']['yscrollcommand'] = s.set
     w['tx_log'].scroll = s
 
@@ -2062,22 +2089,26 @@ class App(TkinterDnD.Tk):
 
 
   def save_project(self):
-    if len(self.input_images) > 0:
-      initial_dir = os.path.dirname(self.input_images[0])
-      default_filename = os.path.splitext(os.path.basename(self.input_images[0]))[0] + '.mft'
-    else:
-      initial_dir = self.config['prefs']['last_opened_location']
-      default_filename = 'new_project.mft'
+    # ask if we don't have a save file yet
+    if self.save_file == None:
+      if len(self.input_images) > 0:
+        initial_dir = os.path.dirname(self.input_images[0])
+        default_filename = os.path.splitext(os.path.basename(self.input_images[0]))[0] + '.mft'
+      else:
+        initial_dir = self.config['prefs']['last_opened_location']
+        default_filename = 'new_project.mft'
 
-    save_file = tk.filedialog.asksaveasfilename(
-      initialdir= initial_dir,
-      confirmoverwrite=True,
-      defaultextension='mft',
-      initialfile=default_filename
-    )
+      save_file = tk.filedialog.asksaveasfilename(
+        initialdir= initial_dir,
+        confirmoverwrite=True,
+        defaultextension='mft',
+        initialfile=default_filename
+      )
 
-    if save_file == '':
-      return
+      if save_file == '':
+        return
+
+      self.save_file = save_file
 
     data = {
       'input_images': self.input_images,
@@ -2092,6 +2123,8 @@ class App(TkinterDnD.Tk):
 
 
   def load_project(self):
+    w = self.widgets
+
     load_file = tk.filedialog.askopenfilename(
       title = 'Load a project file',
       initialdir = self.config['prefs']['last_opened_location'],
@@ -2110,13 +2143,21 @@ class App(TkinterDnD.Tk):
           infile.close()
           return
 
+        # clean out the current files
+        for image_id in self.input_images[:]:
+          w['tr_images'].delete(image_id)
+          w['tr_mask_images'].delete(image_id)
+          self.input_images.remove(image_id)
+
         self.add_images(data['input_images'])
         self.masks = data['masks']
 
         self.update_mask_image_list()
+        self.update_mask_canvas()
 
         # set the window title to the filename
         self.title('MFTker - ' + os.path.basename(load_file))
+        self.save_file = load_file
 
 
 
@@ -2254,6 +2295,80 @@ class OpenCV_Aligner():
     pool.close()
     pool.terminate()
     pool.join()
+
+
+
+
+class ScrollableFrame(tk.Canvas):
+  ''' simulate a scrollable frame by using a Frame inside a Canvas '''
+  scrollable = False
+  scrollbar  = None
+
+  def __init__(self, *args, **kwargs):
+    tk.Canvas.__init__(self, *args, **kwargs)
+    self.grid_columnconfigure(0, weight=1)
+    self.grid_rowconfigure(0, weight=1)
+
+    self.view_port = tk.Frame(self)
+    self.canvas_frame = self.create_window((0,0), window=self.view_port, anchor=tk.NW)
+    self.bind('<Configure>', self.on_canvas_configure)
+
+    # handle mouse scroll
+    self.bind('<Enter>', self.on_enter)
+    self.bind('<Leave>', self.on_leave)
+
+
+  def on_canvas_configure(self, e):
+    req_width  = self.view_port.winfo_reqwidth()
+    req_height = self.view_port.winfo_reqheight()
+
+    # set the width of the canvas to the requested width of the inner frame
+    self.config(width = req_width)
+
+    # set the inner frame to expand to the available height if needed
+    if req_height < e.height:
+      self.itemconfig(self.canvas_frame, height=e.height)
+
+    # set the scroll region to the requested size of the inner frame
+    if e.height < req_height:
+      self.scrollable = True
+      self.config(scrollregion=(0, 0, req_width, req_height))
+      self.scrollbar.grid()
+    else:
+      # no scrolling needed
+      self.scrollable = False
+      self.config(scrollregion=self.bbox(tk.ALL))
+      self.scrollbar.grid_remove()
+
+
+  def on_enter(self, event):
+    # bind wheel events when the cursor enters the control
+    if self.scrollable == True:
+      if platform.system() == 'Linux':
+        self.bind_all('<Button-4>', self.on_mouse_wheel)
+        self.bind_all('<Button-5>', self.on_mouse_wheel)
+      else:
+        self.bind_all('<MouseWheel>', self.on_mouse_wheel)
+
+  def on_leave(self, event):
+    # unbind wheel events when the cursorl leaves the control
+    if platform.system() == 'Linux':
+      self.unbind_all('<Button-4>')
+      self.unbind_all('<Button-5>')
+    else:
+      self.unbind_all('<MouseWheel>')
+
+  def on_mouse_wheel(self, event):
+    # cross platform scroll wheel event
+    if platform.system() == 'Windows':
+      self.yview_scroll(int(-1* (event.delta/120)), 'units')
+    elif platform.system() == 'Darwin':
+      self.yview_scroll(int(-1 * event.delta), 'units')
+    else:
+      if event.num == 4:
+        self.yview_scroll( -1, 'units' )
+      elif event.num == 5:
+        self.yview_scroll( 1, 'units' )
 
 
 
