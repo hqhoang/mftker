@@ -10,4 +10,6 @@ Requirements:
 * exiftool
 * TkinterDND2 (pip install tkinterdnd2)
 * Pillow (pip install Pillow)
+* OpenCV (pip install opencv, or, pip install opencv-contrib-python)
+
 
