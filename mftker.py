@@ -22,6 +22,7 @@ import threading
 import collections
 import copy
 import math
+import json
 
 class App(TkinterDnD.Tk):
 
@@ -117,7 +118,10 @@ class App(TkinterDnD.Tk):
 
 
     # add top-level buttons
-    # ttk.Button(container, text='Placeholder').grid(column=2, row=0, sticky=(tk.E, tk.N), padx=10)
+    ttk.Button(container, text='Load', command=self.load_project) \
+       .grid(column=1, row=0, sticky=(tk.E, tk.N), padx=(0, 10))
+    ttk.Button(container, text='Save', command=self.save_project) \
+       .grid(column=2, row=0, sticky=(tk.E, tk.N), padx=(0,10))
 
 
     w = self.widgets # shorthand
@@ -286,7 +290,7 @@ class App(TkinterDnD.Tk):
     tab_stack.columnconfigure(1, weight=2)
 
 
-    fr_stack_align = ttk.Labelframe(tab_stack, text='Alignment options')
+    fr_stack_align = ttk.Labelframe(tab_stack, text=' Alignment options ')
     fr_stack_align.grid(column=0, row=0, sticky=(tk.N, tk.EW))
 
     v_ck_align = tk.BooleanVar()
@@ -308,7 +312,7 @@ class App(TkinterDnD.Tk):
 
 
     # align_image_stack options
-    fr_stack_ais = ttk.Labelframe(tab_stack, text='align_image_stack options')
+    fr_stack_ais = ttk.Labelframe(tab_stack, text=' align_image_stack options ')
     fr_stack_ais.grid(column=0, row=1, sticky=(tk.N, tk.EW))
     w['fr_stack_ais'] = fr_stack_ais
 
@@ -381,7 +385,7 @@ class App(TkinterDnD.Tk):
 
 
     # ECC option
-    fr_stack_ecc = ttk.Labelframe(tab_stack, text='ECC options')
+    fr_stack_ecc = ttk.Labelframe(tab_stack, text=' ECC options ')
     fr_stack_ecc.grid(column=0, row=1, sticky=(tk.N, tk.EW))
     w['fr_stack_ecc'] = fr_stack_ecc
 
@@ -416,7 +420,7 @@ class App(TkinterDnD.Tk):
     # Fusion options
     ttk.Frame(tab_stack).grid(column=0, row=1, sticky=(tk.N, tk.EW), pady=5)  # padding between frames
 
-    fr_stack_fusion = ttk.Labelframe(tab_stack, text='Fusion')
+    fr_stack_fusion = ttk.Labelframe(tab_stack, text=' Fusion ')
     fr_stack_fusion.grid(column=0, row=2, sticky=(tk.N, tk.EW))
     fr_stack_fusion.columnconfigure(3, weight=1)
 
@@ -526,7 +530,7 @@ class App(TkinterDnD.Tk):
     # Output options
     ttk.Frame(tab_stack).grid(column=0, row=3, sticky=(tk.N, tk.EW), pady=5)  # padding between frames
 
-    fr_stack_output = ttk.Labelframe(tab_stack, text='Output')
+    fr_stack_output = ttk.Labelframe(tab_stack, text=' Output ')
     fr_stack_output.grid(column=0, row=4, sticky=(tk.N, tk.EW))
     fr_stack_output.columnconfigure(3, weight=1)
 
@@ -665,7 +669,7 @@ class App(TkinterDnD.Tk):
     tab_prefs.columnconfigure(1, weight=1)
 
     # path to the required tools
-    fr_prefs_exec = ttk.Labelframe(tab_prefs, text='Program/Execute')
+    fr_prefs_exec = ttk.Labelframe(tab_prefs, text=' Program/Execute ')
     fr_prefs_exec.grid(column=0, row=0, sticky=(tk.N, tk.EW), pady=(0, 20))
 
     # align_image_stack exec
@@ -703,7 +707,7 @@ class App(TkinterDnD.Tk):
 
 
     # align_image_stack options
-    fr_prefs_align = ttk.Labelframe(tab_prefs, text='Alignment options')
+    fr_prefs_align = ttk.Labelframe(tab_prefs, text=' Alignment options ')
     fr_prefs_align.grid(column=0, row=2, sticky=(tk.N, tk.EW), pady=(0,20))
 
     # aligned prefix
@@ -723,7 +727,7 @@ class App(TkinterDnD.Tk):
 
 
     # GUI options
-    fr_prefs_gui = ttk.Labelframe(tab_prefs, text='GUI options')
+    fr_prefs_gui = ttk.Labelframe(tab_prefs, text=' GUI options ')
     fr_prefs_gui.grid(column=0, row=4, sticky=(tk.N, tk.EW))
 
     # mask include color
@@ -918,6 +922,7 @@ class App(TkinterDnD.Tk):
       w['fr_tif_options'].grid_remove()
 
     w['cb_file_format'].selection_clear()
+
 
 
   def browse_exec_align(self):
@@ -1855,9 +1860,6 @@ class App(TkinterDnD.Tk):
     """ perform optional alignment and fusing the images """
     w = self.widgets
 
-    global logger    # ugly work-around as apply_async() can pickle anything involve tK
-    logger = w['tx_log']
-
     # check if we have at least 2 images
     if len(self.input_images) < 2:
       tk.messagebox.showinfo(message='Please add at least two images.')
@@ -2057,6 +2059,64 @@ class App(TkinterDnD.Tk):
 
     self.subprocess = None
     self.returncode.set(p.returncode)
+
+
+  def save_project(self):
+    if len(self.input_images) > 0:
+      initial_dir = os.path.dirname(self.input_images[0])
+      default_filename = os.path.splitext(os.path.basename(self.input_images[0]))[0] + '.mft'
+    else:
+      initial_dir = self.config['prefs']['last_opened_location']
+      default_filename = 'new_project.mft'
+
+    save_file = tk.filedialog.asksaveasfilename(
+      initialdir= initial_dir,
+      confirmoverwrite=True,
+      defaultextension='mft',
+      initialfile=default_filename
+    )
+
+    if save_file == '':
+      return
+
+    data = {
+      'input_images': self.input_images,
+      'masks'       : self.masks
+    }
+
+    with open(save_file, 'w') as outfile:
+      outfile.write(json.dumps(data))
+
+    # set the window title to the filename
+    self.title('MFTker - ' + os.path.basename(save_file))
+
+
+  def load_project(self):
+    load_file = tk.filedialog.askopenfilename(
+      title = 'Load a project file',
+      initialdir = self.config['prefs']['last_opened_location'],
+      filetypes = [('MFTker project file', '.mft')],
+      multiple = False
+    )
+
+    if load_file != '':
+      with open(load_file) as infile:
+        try:
+          data = json.load(infile)
+          infile.close()
+        except json.JSONDecodeError as e:
+          tk.messagebox.showerror(message='Error parsing project file "' +
+                                  os.path.basename(load_file) + '":\n' + str(e))
+          infile.close()
+          return
+
+        self.add_images(data['input_images'])
+        self.masks = data['masks']
+
+        self.update_mask_image_list()
+
+        # set the window title to the filename
+        self.title('MFTker - ' + os.path.basename(load_file))
 
 
 
