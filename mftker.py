@@ -621,7 +621,7 @@ class App(TkinterDnD.Tk):
 
     v_sp_jpg_quality = tk.IntVar()
     w['sp_jpg_quality'] = ttk.Spinbox(w['fr_jpg_options'], justify=tk.CENTER, from_=80, to=100,
-                                      increment=10, width=10, textvariable=v_sp_jpg_quality)
+                                      increment=1, width=10, textvariable=v_sp_jpg_quality)
     w['sp_jpg_quality'].grid(column=1, row=0, sticky=(tk.W))
     w['sp_jpg_quality'].var = v_sp_jpg_quality
 
@@ -681,7 +681,7 @@ class App(TkinterDnD.Tk):
 
 
     # textbox to print log to
-    w['tx_log'] = tk.Text(tab_stack, borderwidth=5, relief=tk.FLAT, state=tk.DISABLED)
+    w['tx_log'] = tk.Text(tab_stack, borderwidth=5, relief=tk.FLAT)
     w['tx_log'].grid(column=2, row=0, sticky=(tk.NS, tk.EW), padx=(4, 0))
 
     # scrollbar for log text
@@ -1028,6 +1028,9 @@ class App(TkinterDnD.Tk):
     w = self.widgets
     for filepath in filepaths:
       if filepath in self.input_images:
+        continue
+
+      if not os.path.exists(filepath):
         continue
 
       filename = os.path.basename(filepath)
@@ -1794,7 +1797,8 @@ class App(TkinterDnD.Tk):
     cmd = [enfuse_exec, '-v', '-o', self.output_name,
            '--exposure-weight=0',
            '--saturation-weight=0',
-           '--contrast-weight=1']
+           '--contrast-weight=1',
+           '--blend-colorspace=CIECAM']
 
     w = self.widgets
 
@@ -1863,7 +1867,7 @@ class App(TkinterDnD.Tk):
       if filepath in file_masks:
         for mask in file_masks[filepath]:
           if mask['type'] == 'exclude':
-            alpha_mask.polygon(mask['mask'], fill=0)
+            alpha_mask.polygon(mask['mask'], fill=126)
 
         # add include mask after exclude masks
         for mask in file_masks[filepath]:
@@ -2150,7 +2154,11 @@ class App(TkinterDnD.Tk):
           self.input_images.remove(image_id)
 
         self.add_images(data['input_images'])
-        self.masks = data['masks']
+
+        self.masks.clear()
+        for image_id in data['masks']:
+          if image_id in self.input_images:
+            self.masks[image_id] = data['masks'][image_id]
 
         self.update_mask_image_list()
         self.update_mask_canvas()
