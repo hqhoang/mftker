@@ -9,12 +9,14 @@ import tkinter.font
 from tkinter import ttk
 from PIL import Image, ImageTk, ImageDraw
 from tkinterdnd2 import DND_FILES, TkinterDnD
-from cv2 import cv2, countNonZero, cvtColor
+from cv2 import cv2
 import numpy as np
 import multiprocessing as mp
 
+import timeit
 
-import os, time
+
+import os
 import platform
 from shutil import which
 import configparser
@@ -67,7 +69,7 @@ class App(TkinterDnD.Tk):
     self.minsize(800, 600)
     self.resizable(True, True)
 
-    #self.geometry('1500x800')
+    # self.geometry('1500x800')
     # use all screen size
     self.geometry("%dx%d+0+0" % (self.winfo_screenwidth(), self.winfo_screenheight()))
 
@@ -423,8 +425,8 @@ class App(TkinterDnD.Tk):
     w['sp_ecc_iterations'].grid(column=1, row=0, sticky=(tk.W), padx=20, pady=10)
     w['sp_ecc_iterations'].var = v_sp_ecc_iterations
 
-    # termination ESP
-    ttk.Label(fr_stack_ecc, text='Termination EPS: ').grid(column=0, row=1, sticky=(tk.E), padx=20, pady=10)
+    # termination epsilon
+    ttk.Label(fr_stack_ecc, text='Termination epsilon: ').grid(column=0, row=1, sticky=(tk.E), padx=20, pady=10)
 
     v_sp_ecc_ter_eps = tk.StringVar()
     w['sp_ecc_ter_eps'] = ttk.Entry(fr_stack_ecc, justify=tk.CENTER, width=10, textvariable=v_sp_ecc_ter_eps)
@@ -1105,7 +1107,7 @@ class App(TkinterDnD.Tk):
 
     if hit == False:
       img = Image.open(image_id)
-      img.thumbnail((width, height), Image.LANCZOS)
+      img.thumbnail((width, height), Image.Resampling.LANCZOS)
       img = ImageTk.PhotoImage(img)
 
       buffer_slot = cache['head'] % len(cache['slots'])
@@ -1386,7 +1388,7 @@ class App(TkinterDnD.Tk):
       img = Image.open(image_id)
       img_full_width = img.width
 
-      img.thumbnail((width, height), Image.LANCZOS)
+      img.thumbnail((width, height), Image.Resampling.LANCZOS)
       cv.image_scale = img.width/img_full_width
 
       tkimg = ImageTk.PhotoImage(img)
@@ -1631,7 +1633,7 @@ class App(TkinterDnD.Tk):
     height = cv.winfo_height()
 
     img = Image.open(self.output_image)
-    img.thumbnail((width, height), Image.LANCZOS)
+    img.thumbnail((width, height), Image.Resampling.LANCZOS)
     img = ImageTk.PhotoImage(img)
 
     cv.create_image(width/2, height/2, anchor=tk.CENTER, image=img)
@@ -1648,8 +1650,8 @@ class App(TkinterDnD.Tk):
     c['DEFAULT'] = {
       'ck_align'                : 'True',
       'cb_stack_aligner'        : 'ECC',
-      'sp_ecc_iterations'       : '10',
-      'sp_ecc_ter_eps'          : '1e-7',
+      'sp_ecc_iterations'       : '50',
+      'sp_ecc_ter_eps'          : '1e-1',
       'sp_ecc_pool'             : math.floor(mp.cpu_count()/2),
       'ck_autocrop'             : 'True',
       'ck_centershift'          : 'True',
@@ -2054,6 +2056,7 @@ class App(TkinterDnD.Tk):
 
 
 
+
   def cancel_stack_images(self):
     w = self.widgets
     self.stack_cancelled = True
@@ -2119,11 +2122,11 @@ class App(TkinterDnD.Tk):
       'masks'       : self.masks
     }
 
-    with open(save_file, 'w') as outfile:
+    with open(self.save_file, 'w') as outfile:
       outfile.write(json.dumps(data))
 
     # set the window title to the filename
-    self.title('MFTker - ' + os.path.basename(save_file))
+    self.title('MFTker - ' + os.path.basename(self.save_file))
 
 
   def load_project(self):
@@ -2170,18 +2173,18 @@ class App(TkinterDnD.Tk):
 
 
 
+
+
 class OpenCV_Aligner():
   prefix = 'aligned__'
-  iteration = 10
-  ter_eps = 1e-7
+  iteration = 20
+  ter_eps = 1e-1
   pool_size = math.floor(mp.cpu_count()/2)
   cancelled = False  # flag to terminate processes
 
   def align(self, image_list, options = {}):
-    global pool
-    global logger
-
     """ root-level function for multiprocessing """
+    global pool
 
     if 'prefix' in options:
       self.prefix = options['prefix']
@@ -2194,7 +2197,6 @@ class OpenCV_Aligner():
 
     if 'pool_size' in options:
       self.pool_size = options['pool_size']
-
 
     anchor_index = math.floor(len(image_list)/2)
     anchor_img = cv2.imread(image_list[anchor_index])
@@ -2209,9 +2211,6 @@ class OpenCV_Aligner():
     options['logger'].insert(tk.END, '\nUsing "' + os.path.basename(image_list[anchor_index]) + '" as anchor')
     options['logger'].see(tk.END)
 
-    # align other images against anchor
-    anchor_img_gray = cv2.cvtColor(anchor_img, cv2.COLOR_BGR2GRAY)
-
     # initiate a pool
     pool = mp.Pool(self.pool_size)
 
@@ -2222,13 +2221,27 @@ class OpenCV_Aligner():
     results = []
     self.cancelled = False
 
+    worker_options = {
+      'prefix'      :  str(options['prefix']),
+      'iteration'   :  int(options['iteration']),
+      'ter_eps'     :  float(options['ter_eps'])
+    }
+
     for i, filepath in enumerate(image_list):
       if i != anchor_index:
         options['logger'].insert(tk.END, '\nAligning "' + os.path.basename(filepath) + '"')
         options['logger'].see(tk.END)
 
-        # important: do not pass any widget to apply_async, or it won't run
-        result = pool.apply_async(self.align_image_ECC, (anchor_img_gray, filepath))
+
+        # important: do not pass any widget to apply_async since we're copying the parent into the child processes
+        result = pool.apply_async(self.align_pyramid, (str(image_list[anchor_index]), str(filepath), worker_options.copy()))
+
+        # for single-process debugging:
+        # result = self.align_pyramid(str(image_list[anchor_index]), str(filepath), worker_options.copy())
+
+        if self.cancelled == True:
+          break
+
         results.append(result)
 
       aligned_filename = os.path.join(
@@ -2252,47 +2265,99 @@ class OpenCV_Aligner():
 
 
 
-  def align_image_ECC(self, anchor_img_gray, target_filepath):
-    print('ECC aligning: ', target_filepath)
 
-    img = cv2.imread(target_filepath)
-    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+  def align_pyramid(self, anchor_filepath, target_filepath, options):
+    ''' pyramid algorithm from https://stackoverflow.com/questions/45997891/cv2-motion-euclidean-for-the-warp-mode-in-ecc-image-alignment-method '''
 
-    warp_mode = cv2.MOTION_AFFINE
-    warp_matrix = np.eye(2, 3, dtype=np.float32)
+    print('\nECC aligning ' + os.path.basename(target_filepath) + ' against ' + os.path.basename(anchor_filepath))
 
-    # Specify the number of iterations.
-    number_of_iterations = self.iteration
+    anchor_img = cv2.imread(anchor_filepath)
+    anchor_img_gray = cv2.cvtColor(anchor_img, cv2.COLOR_RGB2GRAY)
 
-    # Specify the threshold of the increment in the correlation
-    # coefficient between two iterations
-    termination_eps = self.ter_eps
+    prefix    = options['prefix']
+    iteration = options['iteration']
+    ter_eps   = options['ter_eps']
 
-    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                number_of_iterations, termination_eps)
+    pyramid_level = None
+    if 'pyramid_level' in options:
+      pyramid_level = options['pyramid_level']
 
-    # Run the ECC algorithm. The results are stored in warp_matrix.
-    (cc, warp_matrix) = cv2.findTransformECC(anchor_img_gray, img_gray, warp_matrix,
-                                              warp_mode, criteria)
+
+    warp_mode = cv2.MOTION_HOMOGRAPHY
+
+    # Initialize the matrix to identity
+    warp_matrix = np.array([[1,0,0],[0,1,0],[0,0,1]], dtype=np.float32)
+
+    w = anchor_img_gray.shape[1]
+
+    # determine number of levels
+    if pyramid_level is None:
+      nol =  math.floor((math.log(w/300, 2)))
+    else:
+      nol = pyramid_level
+
+    # print('Number of levels: ' + str(nol))
+
+    warp_matrix[0][2] /= (2**nol)
+    warp_matrix[1][2] /= (2**nol)
+
+    target_img = cv2.imread(target_filepath)
+    target_img_gray = cv2.cvtColor(target_img, cv2.COLOR_RGB2GRAY)
+
+    # construct grayscale pyramid
+    gray1_pyr = [anchor_img_gray]
+    gray2_pyr = [target_img_gray]
+
+    # print('target_img: ', target_img_gray.shape)
+
+    for level in range(nol):
+      # print('level: ', level, ', gray1_pyr[0].shape: ', gray1_pyr[0].shape)
+
+      gray1_pyr.insert(0, cv2.resize(gray1_pyr[0], None, fx=1/2, fy=1/2, interpolation=cv2.INTER_AREA))
+      gray2_pyr.insert(0, cv2.resize(gray2_pyr[0], None, fx=1/2, fy=1/2, interpolation=cv2.INTER_AREA))
+
+    # Terminate the optimizer if either the max iterations or the threshold are reached
+    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, iteration, ter_eps )
+
+    # run pyramid ECC
+    # pyr_start_time = timeit.default_timer()
+
+    for level in range(nol+1):
+      # lvl_start_time = timeit.default_timer()
+
+      grad1 = gray1_pyr[level]
+      grad2 = gray2_pyr[level]
+
+      # print('level:', level, ', gray1_pyr[level].shape:', gray1_pyr[level].shape)
+
+      cc, warp_matrix = cv2.findTransformECC(grad1, grad2, warp_matrix, warp_mode, criteria)
+
+      if level < nol:
+        # scale up for the next pyramid level
+        warp_matrix = warp_matrix * np.array([[1,1,2],[1,1,2],[0.5,0.5,1]], dtype=np.float32)
+
+      # print('Level %i time:'%level, timeit.default_timer() - lvl_start_time)
+
+    # print('Pyramid time (', os.path.basename(target_filepath), '): ', timeit.default_timer() - pyr_start_time)
 
     # Get the target size from the desired image
-    target_shape = anchor_img_gray.shape
+    target_shape = anchor_img.shape
 
-    aligned_img = cv2.warpAffine(
-                        img,
+    aligned_img = cv2.warpPerspective(
+                        target_img,
                         warp_matrix,
                         (target_shape[1], target_shape[0]),
-                        flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
                         borderMode=cv2.BORDER_CONSTANT,
-                        borderValue=0)
+                        borderValue=0,
+                        flags=cv2.INTER_AREA + cv2.WARP_INVERSE_MAP)
 
     aligned_filename = os.path.join(
       os.path.dirname(target_filepath),
-      self.prefix + os.path.basename(target_filepath)
+      prefix + os.path.basename(target_filepath)
     )
 
     cv2.imwrite(aligned_filename, aligned_img)
-    print('ECC aligning done, written to: ', aligned_filename)
+    print('\nDone ECC aligning, written to: ' + os.path.basename(aligned_filename))
 
 
 
@@ -2303,6 +2368,10 @@ class OpenCV_Aligner():
     pool.close()
     pool.terminate()
     pool.join()
+
+
+
+
 
 
 
@@ -2382,6 +2451,7 @@ class ScrollableFrame(tk.Canvas):
 
 
 if __name__ == "__main__":
+  mp.freeze_support()
   app = App()
   app.mainloop()
 
