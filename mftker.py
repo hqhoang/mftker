@@ -1985,6 +1985,12 @@ class App(TkinterDnD.Tk):
     if self.stack_cancelled == True:
       return
 
+    # flush the queue
+    self.read_queue()
+    w['tx_log'].insert(tk.END, '\n\nDone aligning all images\n')
+    w['tx_log'].see(tk.END)
+
+
     if w['ck_align'].var.get():
       images = self.aligned_images
     else:
@@ -2291,11 +2297,6 @@ class OpenCV_Aligner():
     # close Pool and let all the processes complete
     pool.close()
     pool.join()  # wait for all processes
-
-    if not self.cancelled:
-      options['logger'].insert(tk.END, '\n\nDone aligning all images\n')
-      options['logger'].see(tk.END)
-
 
     options['aligned_images'] = aligned_images
     options['signaler'].set(0)
