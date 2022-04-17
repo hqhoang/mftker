@@ -14,7 +14,7 @@ import numpy as np
 import multiprocessing as mp
 
 import timeit
-
+import queue
 
 import os
 import platform
@@ -27,18 +27,22 @@ import copy
 import math
 import json
 
-class App(TkinterDnD.Tk):
 
+
+class App(TkinterDnD.Tk):
 
   def __init__(self):
     super().__init__()
 
     # instance variables
+    self.after_handle = None
+
     self.input_images = [] # list of filenames
     self.widgets = {}      # list of widgets
     self.config  = {}      # configurations
     self.flags   = {       # various flags used internally
-      'tr_mask_clicked'   : False
+      'tr_mask_clicked'   : False,
+      'queue_is_active'   : False
     }
     self.masks   = {}      # storage for masks, indexed by filepaths
     self.new_mask = None   # keep track of the mask being created
@@ -46,6 +50,7 @@ class App(TkinterDnD.Tk):
 
     self.output_image = None
     self.save_file    = None
+
 
     self.preview_cache = {
       'slots' : [None] * 5,
@@ -429,7 +434,8 @@ class App(TkinterDnD.Tk):
     ttk.Label(fr_stack_ecc, text='Termination epsilon: ').grid(column=0, row=1, sticky=(tk.E), padx=20, pady=10)
 
     v_sp_ecc_ter_eps = tk.StringVar()
-    w['sp_ecc_ter_eps'] = ttk.Entry(fr_stack_ecc, justify=tk.CENTER, width=10, textvariable=v_sp_ecc_ter_eps)
+    values = ('1e-0','1e-1','1e-2','1e-3','1e-4','1e-5','1e-6','1e-7')
+    w['sp_ecc_ter_eps'] = ttk.Spinbox(fr_stack_ecc, values=values, justify=tk.CENTER, width=10, textvariable=v_sp_ecc_ter_eps)
     w['sp_ecc_ter_eps'].grid(column=1, row=1, sticky=(tk.W), padx=20, pady=10)
     w['sp_ecc_ter_eps'].var = v_sp_ecc_ter_eps
 
@@ -1757,6 +1763,9 @@ class App(TkinterDnD.Tk):
     except Exception as e:
       print(e)
 
+    if self.after_handle != None:
+      self.after_cancel(self.after_handle)
+
     self.destroy()
 
 
@@ -1921,6 +1930,9 @@ class App(TkinterDnD.Tk):
     self.output_image = None
     self.update_output_image_preview()
 
+    self.flags['queue_is_active'] = True
+    self.read_queue()
+
     self.stack_cancelled = False
     self.returncode = tk.IntVar()
 
@@ -2054,6 +2066,8 @@ class App(TkinterDnD.Tk):
     w['bt_cancel_stack'].configure(state=tk.DISABLED)
     w['bt_stack'].configure(state=tk.NORMAL)
 
+    self.flags['queue_is_active'] = False
+
 
 
 
@@ -2093,6 +2107,27 @@ class App(TkinterDnD.Tk):
 
     self.subprocess = None
     self.returncode.set(p.returncode)
+
+
+
+  def read_queue(self):
+    # global main_queue
+    w = self.widgets
+
+    while main_queue.qsize():
+      try:
+        item = main_queue.get(0)
+
+        if item['type'] == 'message':
+          w['tx_log'].insert(tk.END, item['msg'])
+          w['tx_log'].see(tk.END)
+
+      except queue.Empty:
+        pass
+
+    if self.flags['queue_is_active'] == True:
+      self.after_handle = self.after(500, self.read_queue)
+
 
 
   def save_project(self):
@@ -2227,12 +2262,10 @@ class OpenCV_Aligner():
       'ter_eps'     :  float(options['ter_eps'])
     }
 
+
+    results = []
     for i, filepath in enumerate(image_list):
       if i != anchor_index:
-        options['logger'].insert(tk.END, '\nAligning "' + os.path.basename(filepath) + '"')
-        options['logger'].see(tk.END)
-
-
         # important: do not pass any widget to apply_async since we're copying the parent into the child processes
         result = pool.apply_async(self.align_pyramid, (str(image_list[anchor_index]), str(filepath), worker_options.copy()))
 
@@ -2249,6 +2282,10 @@ class OpenCV_Aligner():
         self.prefix + os.path.basename(filepath)
       )
       aligned_images.append(aligned_filename)
+
+    for result in results:
+      if result:
+        result.get()    # needed to catch any error/exception from subprocesses
 
 
     # close Pool and let all the processes complete
@@ -2268,8 +2305,11 @@ class OpenCV_Aligner():
 
   def align_pyramid(self, anchor_filepath, target_filepath, options):
     ''' pyramid algorithm from https://stackoverflow.com/questions/45997891/cv2-motion-euclidean-for-the-warp-mode-in-ecc-image-alignment-method '''
+    # global main_queue
 
-    print('\nECC aligning ' + os.path.basename(target_filepath) + ' against ' + os.path.basename(anchor_filepath))
+    msg = '\nECC aligning ' + os.path.basename(target_filepath) + ' against ' + os.path.basename(anchor_filepath)
+    print(msg)
+    main_queue.put({'type': 'message', 'msg': msg})
 
     anchor_img = cv2.imread(anchor_filepath)
     anchor_img_gray = cv2.cvtColor(anchor_img, cv2.COLOR_RGB2GRAY)
@@ -2320,7 +2360,7 @@ class OpenCV_Aligner():
     criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, iteration, ter_eps )
 
     # run pyramid ECC
-    # pyr_start_time = timeit.default_timer()
+    pyr_start_time = timeit.default_timer()
 
     for level in range(nol+1):
       # lvl_start_time = timeit.default_timer()
@@ -2357,7 +2397,11 @@ class OpenCV_Aligner():
     )
 
     cv2.imwrite(aligned_filename, aligned_img)
-    print('\nDone ECC aligning, written to: ' + os.path.basename(aligned_filename))
+
+    msg = '\nDone ECC aligning, written to: ' + os.path.basename(aligned_filename)
+    msg += ' (' + '{:.2f}'.format(timeit.default_timer() - pyr_start_time) + ' seconds)'
+    print(msg)
+    main_queue.put({'type': 'message', 'msg': msg})
 
 
 
@@ -2451,6 +2495,8 @@ class ScrollableFrame(tk.Canvas):
 
 
 if __name__ == "__main__":
+  main_queue = mp.Queue()
+
   mp.freeze_support()
   app = App()
   app.mainloop()
